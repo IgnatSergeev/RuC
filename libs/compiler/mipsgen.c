@@ -337,6 +337,8 @@ static rvalue emit_expression(encoder *const enc, const node *const nd);
 static rvalue emit_void_expression(encoder *const enc, const node *const nd);
 static void emit_structure_init(encoder *const enc, const lvalue *const target, const node *const initializer);
 static void emit_statement(encoder *const enc, const node *const nd);
+static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const target, const node *const value);
+static void emit_struct_return_call_expression(encoder *const enc, const node *const nd, const lvalue *const target);
 
 
 static size_t mips_type_size(const syntax *const sx, const item_t type)
@@ -2098,6 +2100,42 @@ static rvalue emit_builtin_call(encoder *const enc, const node *const nd)
 }
 
 /**
+ *	Emit load of argument
+ *
+ *	@param	enc					Encoder
+ *	@param	arg					Argument node in AST
+ *
+ *  @return Rvalue of argument expression
+ */
+static rvalue emit_function_argument(encoder *const enc, const node *const arg)
+{
+	const type_t expr_type = expression_get_type(arg);
+
+	if (type_is_structure(enc->sx, expr_type))
+	{
+		const lvalue argument_copy = {.kind = LVALUE_KIND_STACK, .type = expr_type, .loc.displ = enc->scope_displ, .base_reg = R_FP};
+		enc->scope_displ += mips_type_size(enc->sx, expr_type);
+		enc->max_displ = max(enc->scope_displ, enc->max_displ);
+
+		emit_struct_assignment(enc, &argument_copy, arg);
+		return emit_load_of_lvalue(enc, &argument_copy);
+	}
+
+	if (type_is_function(enc->sx, expr_type) && type_is_structure(enc->sx, type_function_get_return_type(enc->sx, expr_type)))
+	{
+		const lvalue function_return_value = {.kind = LVALUE_KIND_STACK, .type = expr_type, .loc.displ = enc->scope_displ, .base_reg = R_FP};
+		enc->scope_displ += mips_type_size(enc->sx, expr_type);
+		enc->max_displ = max(enc->scope_displ, enc->max_displ);
+
+		emit_struct_return_call_expression(enc, arg, &function_return_value);
+		return emit_load_of_lvalue(enc, &function_return_value);
+	}
+
+	const rvalue tmp = emit_expression(enc, arg);
+	return (tmp.kind == RVALUE_KIND_CONST) ? emit_load_of_immediate(enc, &tmp) : tmp;
+}
+
+/**
  *	Emit load of arguments inside function call
  *
  *	@param	enc					Encoder
@@ -2120,13 +2158,13 @@ static void emit_function_arguments_loading(encoder *const enc, const node *cons
 
 	size_t f_arg_count = 0;
 	size_t arg_count = 0;
-	// TODO: структуры / массивы в параметры
-	// TODO: вызовы как аргументы
+	// TODO: массивы в параметры
+	const size_t old_displ = enc->scope_displ;
 	for (size_t i = 0; i < params_amount; i++)
 	{
 		const node arg = expression_call_get_argument(nd, i);
-		const rvalue tmp = emit_expression(enc, &arg);
-		const rvalue arg_rvalue = (tmp.kind == RVALUE_KIND_CONST) ? emit_load_of_immediate(enc, &tmp) : tmp;
+		const rvalue arg_rvalue = emit_function_argument(enc, &arg);
+
 		const size_t supposed_reg_num = type_is_floating(arg_rvalue.type)
 											? f_arg_count
 											: does_return_structure ? (arg_count + 1): arg_count;
@@ -2194,6 +2232,7 @@ static void emit_function_arguments_loading(encoder *const enc, const node *cons
 
 		free_rvalue(enc, &arg_rvalue);
 	}
+	enc->scope_displ = old_displ;
 }
 
 /**
