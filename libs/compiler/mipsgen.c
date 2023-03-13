@@ -1107,9 +1107,14 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
 	// TODO: выдача сохраняемых регистров 
 	assert(is_register == false);
 	const bool is_local = ident_is_local(enc->sx, identifier);
-	const size_t location = is_local ? enc->scope_displ : enc->global_displ;
 	const mips_register_t base_reg = is_local ? R_FP : R_GP;
 	const item_t type = ident_get_type(enc->sx, identifier);
+	if (is_local && !is_register)
+	{
+		enc->scope_displ += mips_type_size(enc->sx, type);
+		enc->max_displ = max(enc->scope_displ, enc->max_displ);
+	}
+	const item_t location = is_local ? -(item_t)enc->scope_displ : (item_t)enc->global_displ;
 
 	if ((!is_local) && (is_register))	// Запрет на глобальные регистровые переменные
 	{
@@ -1125,11 +1130,6 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
 	if (!is_local)
 	{
 		enc->global_displ += mips_type_size(enc->sx, type);
-	}
-	else if (!is_register)
-	{
-		enc->scope_displ += mips_type_size(enc->sx, type);
-		enc->max_displ = max(enc->scope_displ, enc->max_displ);
 	}
 
 	return (lvalue) { .kind = is_register ? LVALUE_KIND_REGISTER : LVALUE_KIND_STACK, .base_reg = base_reg, .loc.displ = location, .type = type };
@@ -3437,8 +3437,12 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			}
 			else
 			{
-				// TODO:
-				assert(false);
+				const item_t type = ident_get_type(enc->sx, id);
+				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH;
+				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
+
+				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
+				displacements_set(enc, id, &value);
 			}
 		}
 		else
@@ -3457,8 +3461,12 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			}
 			else
 			{
-				// TODO:
-				assert(false);
+				const item_t type = ident_get_type(enc->sx, id);
+				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH;
+				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
+
+				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
+				displacements_set(enc, id, &value);
 			}
 		}
 	}
@@ -3471,16 +3479,14 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 	char *buffer = out_extract_buffer(enc->sx->io);
 	enc->sx->io = old_io;
 
-	uni_printf(enc->sx->io, "\n\t# setting up $sp:\n");
-	// $fp указывает на конец динамики (которое в данный момент равно концу статики)
-	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_SP, R_SP, -(item_t)(enc->max_displ + FUNC_DISPL_PRESEREVED + WORD_LENGTH));
-
 	uni_printf(enc->sx->io, "\n\t# setting up $fp:\n");
-	// $sp указывает на конец статики (которое в данный момент равно концу динамики)
-	to_code_2R(enc->sx->io, IC_MIPS_MOVE, R_FP, R_SP);
+	// $fp указывает на конец статики (которое в данный момент равно концу динамики)
+	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_FP, R_SP, -(item_t)(FUNC_DISPL_PRESEREVED + WORD_LENGTH));
 
-	// Смещаем $fp ниже конца статики (чтобы он не совпадал с $sp)
-	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_SP, R_SP, -(item_t)WORD_LENGTH);
+	uni_printf(enc->sx->io, "\n\t# setting up $sp:\n");
+	// $sp указывает на конец динамики (которое в данный момент равно концу статики)
+	// Смещаем $sp ниже конца статики (чтобы он не совпадал с $fp)
+	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_SP, R_FP, -(item_t)(WORD_LENGTH + enc->max_displ));
 
 	uni_printf(enc->sx->io, "%s", buffer);
 	free(buffer);
@@ -3492,8 +3498,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 	uni_printf(enc->sx->io, "\n\t# data restoring:\n");
 
 	// Ставим $fp на его положение в предыдущей функции
-	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_SP, R_FP,
-				(item_t)(enc->max_displ + FUNC_DISPL_PRESEREVED + WORD_LENGTH));
+	to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, R_SP, R_FP, (item_t)(FUNC_DISPL_PRESEREVED + WORD_LENGTH));
 
 	uni_printf(enc->sx->io, "\n");
 
