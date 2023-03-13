@@ -339,6 +339,7 @@ static void emit_structure_init(encoder *const enc, const lvalue *const target, 
 static void emit_statement(encoder *const enc, const node *const nd);
 static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const target, const node *const value);
 static void emit_struct_return_call_expression(encoder *const enc, const node *const nd, const lvalue *const target);
+static rvalue emit_member_expression(encoder *const enc, const node *const nd, bool is_the_value_used);
 
 
 static size_t mips_type_size(const syntax *const sx, const item_t type)
@@ -2131,6 +2132,19 @@ static rvalue emit_function_argument(encoder *const enc, const node *const arg)
 		return emit_load_of_lvalue(enc, &function_return_value);
 	}
 
+	// Member и не structure
+	if (expression_get_class(arg) == EXPR_MEMBER && !expression_is_lvalue(arg))
+	{
+		const size_t old_displ = enc->scope_displ;
+		const rvalue arg_rvalue = emit_member_expression(enc, arg, true);
+
+		// Значение будет на регистре, т к не structure,
+		// поэтому очищаем место выданное в emit_member_expression
+		enc->scope_displ = old_displ;
+
+		return arg_rvalue;
+	}
+
 	const rvalue tmp = emit_expression(enc, arg);
 	return (tmp.kind == RVALUE_KIND_CONST) ? emit_load_of_immediate(enc, &tmp) : tmp;
 }
@@ -2424,7 +2438,7 @@ static rvalue emit_call_expression(encoder *const enc, const node *const nd)
  *
  *	@return	Rvalue of member expression
  */
-static rvalue emit_member_expression(encoder *const enc, const node *const nd)
+static rvalue emit_member_expression(encoder *const enc, const node *const nd, bool is_the_value_used)
 {
 	(void)enc;
 	(void)nd;
@@ -2923,7 +2937,7 @@ static rvalue emit_expression(encoder *const enc, const node *const nd)
 			}
 
 		case EXPR_MEMBER:
-			return emit_member_expression(enc, nd);
+			return emit_member_expression(enc, nd, false);
 
 		case EXPR_CAST:
 			return emit_cast_expression(enc, nd);
