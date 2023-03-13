@@ -3399,6 +3399,8 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 		}
 	}
 
+	const size_t displacement_for_return_address = type_is_structure(enc->sx, return_type) ? WORD_LENGTH : 0;
+
 	// Создание буфера для тела функции
 	universal_io *const old_io = enc->sx->io;
 	universal_io new_io = io_create();
@@ -3438,7 +3440,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			else
 			{
 				const item_t type = ident_get_type(enc->sx, id);
-				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH;
+				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH + displacement_for_return_address;
 				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
 
 				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
@@ -3462,7 +3464,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			else
 			{
 				const item_t type = ident_get_type(enc->sx, id);
-				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH;
+				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH + displacement_for_return_address;
 				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
 
 				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
