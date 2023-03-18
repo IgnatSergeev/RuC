@@ -2800,8 +2800,7 @@ static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const tar
 	else// Присваивание другой структуры
 	{
 		// FIXME: массив структур
-		const size_t RHS_identifier = expression_identifier_get_id(value);
-		const lvalue RHS_lvalue = displacements_get(enc, RHS_identifier);
+		const lvalue RHS_lvalue = emit_identifier_lvalue(enc, value);
 
 		// Копирование всех данных из RHS
 		const item_t type = expression_get_type(value);
@@ -3418,12 +3417,13 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 		++gpr_count;
 	}
 
+	size_t displacement = FUNC_DISPL_PRESEREVED + WORD_LENGTH + displacement_for_return_address;
 	for (size_t i = 0; i < parameters; i++)
 	{
 		const size_t id = declaration_function_get_parameter(nd, i);
 		uni_printf(enc->sx->io, "\t# parameter \"%s\" ", ident_get_spelling(enc->sx, id));
 
-		if (!type_is_floating(ident_get_type(enc->sx, id)))
+		if (!type_is_floating(ident_get_type(enc->sx, id)) && !type_is_array(enc->sx, ident_get_type(enc->sx, id)))
 		{
 			if (gpr_count < ARG_REG_AMOUNT)
 			{
@@ -3441,14 +3441,15 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			else
 			{
 				const item_t type = ident_get_type(enc->sx, id);
-				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH + displacement_for_return_address;
-				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
+				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displacement);
 
-				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
+				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displacement, .base_reg = R_FP };
 				displacements_set(enc, id, &value);
+
+				displacement += WORD_LENGTH;
 			}
 		}
-		else
+		else if (type_is_floating(ident_get_type(enc->sx, id)))
 		{
 			if (fp_count < ARG_REG_AMOUNT / 2)
 			{
@@ -3465,11 +3466,40 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 			else
 			{
 				const item_t type = ident_get_type(enc->sx, id);
-				const size_t displ = i * WORD_LENGTH + FUNC_DISPL_PRESEREVED + WORD_LENGTH + displacement_for_return_address;
-				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displ);
+				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displacement);
 
-				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displ, .base_reg = R_FP };
+				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displacement, .base_reg = R_FP };
 				displacements_set(enc, id, &value);
+
+				displacement += WORD_LENGTH;
+			}
+		}
+		else // array
+		{
+			if (gpr_count < ARG_REG_AMOUNT)
+			{
+				// Рассматриваем их как стековые переменные с адресом в регистре
+				const item_t type = ident_get_type(enc->sx, id);
+				const mips_register_t curr_reg = R_A0 + gpr_count++;
+				uni_printf(enc->sx->io, "address is in register ");
+				mips_register_to_io(enc->sx->io, curr_reg);
+				uni_printf(enc->sx->io, "\n");
+
+				// Вносим переменную в таблицу символов
+				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = 0, .base_reg = curr_reg };
+				displacements_set(enc, id, &value);
+			}
+			else
+			{
+				const item_t type = ident_get_type(enc->sx, id);
+				uni_printf(enc->sx->io, "address is on stack at offset %zu from $fp\n", displacement);
+
+				// Адрес массива на стеке
+				const lvalue address_lvalue = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .loc.displ = displacement, .base_reg = R_FP };
+
+				displacements_set(enc, id, &address_lvalue);
+
+				displacement += WORD_LENGTH;
 			}
 		}
 	}
