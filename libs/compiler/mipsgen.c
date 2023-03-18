@@ -1105,7 +1105,7 @@ static void lvalue_to_io(encoder *const enc, const lvalue *const value)
  */
 static lvalue displacements_add(encoder *const enc, const size_t identifier, const bool is_register)
 {
-	// TODO: выдача сохраняемых регистров 
+	// TODO: выдача сохраняемых регистров
 	assert(is_register == false);
 	const bool is_local = ident_is_local(enc->sx, identifier);
 	const mips_register_t base_reg = is_local ? R_FP : R_GP;
@@ -1519,7 +1519,7 @@ static lvalue emit_member_lvalue(encoder *const enc, const node *const nd)
 	}
 	else
 	{
-		const lvalue base_lvalue = emit_lvalue(enc, &base);
+		const lvalue base_lvalue = emit_lvalue(enc, &base);// Не может быть массивом, так что не нужно очищать регистр
 		const size_t displ = (size_t)(base_lvalue.loc.displ + member_displ);
 		return (lvalue) {
 			.kind = LVALUE_KIND_STACK,
@@ -2546,7 +2546,7 @@ static rvalue emit_cast_expression(encoder *const enc, const node *const nd)
 static rvalue emit_increment_expression(encoder *const enc, const node *const nd)
 {
 	const node operand = expression_unary_get_operand(nd);
-	const lvalue operand_lvalue = emit_lvalue(enc, &operand);
+	const lvalue operand_lvalue = emit_lvalue(enc, &operand);// Не может быть массивом, так что не нужно очищать регистр
 	const rvalue operand_rvalue = emit_load_of_lvalue(enc, &operand_lvalue);
 
 	const unary_t operator = expression_unary_get_operator(nd);
@@ -2652,6 +2652,13 @@ static rvalue emit_unary_expression(encoder *const enc, const node *const nd)
 				operand_lvalue.base_reg,
 				operand_lvalue.loc.displ
 			);
+
+			// Очистка регистр занятого под адрес массива
+			if (type_is_array(enc->sx, operand_lvalue.type) && expression_get_class(&operand) == EXPR_IDENTIFIER
+				&& is_identifier_function_argument(enc, expression_identifier_get_id(&operand)))
+			{
+				free_register(enc, operand_lvalue.base_reg);
+			}
 			return result_rvalue;
 		}
 
@@ -2866,7 +2873,7 @@ static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const tar
 static rvalue emit_assignment_expression(encoder *const enc, const node *const nd)
 {
 	const node LHS = expression_assignment_get_LHS(nd);
-	const lvalue target = emit_lvalue(enc, &LHS);
+	const lvalue target = emit_lvalue(enc, &LHS); // TODO массив
 
 	const node RHS = expression_assignment_get_RHS(nd);
 	const item_t RHS_type = expression_get_type(&RHS);
@@ -2883,6 +2890,11 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 	if (operator == BIN_ASSIGN)
 	{
 		emit_store_of_rvalue(enc, &target, &value);
+		if (type_is_array(enc->sx, target.type) && expression_get_class(&LHS) == EXPR_IDENTIFIER
+			&& is_identifier_function_argument(enc, expression_identifier_get_id(&LHS)))
+		{
+			free_register(enc, target.base_reg);
+		}
 		return value;
 	}
 
@@ -2936,6 +2948,11 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 	free_rvalue(enc, &value);
 
 	emit_store_of_rvalue(enc, &target, &target_value);
+	if (type_is_array(enc->sx, target.type) && expression_get_class(&LHS) == EXPR_IDENTIFIER
+		&& is_identifier_function_argument(enc, expression_identifier_get_id(&LHS)))
+	{
+		free_register(enc, target.base_reg);
+	}
 	return target_value;
 }
 
@@ -2975,7 +2992,16 @@ static rvalue emit_expression(encoder *const enc, const node *const nd)
 	if (expression_is_lvalue(nd))
 	{
 		const lvalue lval = emit_lvalue(enc, nd);
-		return emit_load_of_lvalue(enc, &lval);
+		const rvalue loaded_lval =  emit_load_of_lvalue(enc, &lval);
+
+		// Очистка регистр занятого под адрес массива
+		if (type_is_array(enc->sx, lval.type) && expression_get_class(nd) == EXPR_IDENTIFIER
+			&& is_identifier_function_argument(enc, expression_identifier_get_id(nd)))
+		{
+			free_register(enc, lval.base_reg);
+		}
+
+		return loaded_lval;
 	}
 
 	// Иначе rvalue:
@@ -3060,7 +3086,14 @@ static rvalue emit_void_expression(encoder *const enc, const node *const nd)
 {
 	if (expression_is_lvalue(nd))
 	{
-		emit_lvalue(enc, nd);	// Либо регистровая переменная, либо на стеке => ничего освобождать не надо
+		const lvalue lvalue = emit_lvalue(enc, nd);
+
+		// Очистка регистр занятого под адрес массива
+		if (type_is_array(enc->sx, lvalue.type) && expression_get_class(nd) == EXPR_IDENTIFIER
+			&& is_identifier_function_argument(enc, expression_identifier_get_id(nd)))
+		{
+			free_register(enc, lvalue.base_reg);
+		}
 	}
 	else
 	{
