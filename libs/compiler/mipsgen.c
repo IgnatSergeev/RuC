@@ -337,6 +337,7 @@ static rvalue emit_expression(encoder *const enc, const node *const nd);
 static rvalue emit_void_expression(encoder *const enc, const node *const nd);
 static void emit_structure_init(encoder *const enc, const lvalue *const target, const node *const initializer);
 static void emit_statement(encoder *const enc, const node *const nd);
+static rvalue emit_load_of_lvalue(encoder *const enc, const lvalue *const lval);
 
 
 static size_t mips_type_size(const syntax *const sx, const item_t type)
@@ -1122,10 +1123,11 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
 		system_error(node_unexpected);
 	}
 
-	const size_t index = hash_add(&enc->displacements, identifier, 3);
+	const size_t index = hash_add(&enc->displacements, identifier, 4);
 	hash_set_by_index(&enc->displacements, index, 0, (is_register) ? 1 : 0);
 	hash_set_by_index(&enc->displacements, index, 1, location);
 	hash_set_by_index(&enc->displacements, index, 2, base_reg);
+	hash_set_by_index(&enc->displacements, index, 3, false); // Is function argument
 
 	if (!is_local)
 	{
@@ -1144,10 +1146,11 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
  */
 static void displacements_set(encoder *const enc, const size_t identifier, const lvalue *const value)
 {
-	const size_t index = hash_add(&enc->displacements, identifier, 3);
+	const size_t index = hash_add(&enc->displacements, identifier, 4);
 	hash_set_by_index(&enc->displacements, index, 0, (value->kind == LVALUE_KIND_REGISTER) ? 1 : 0);
 	hash_set_by_index(&enc->displacements, index, 1, value->loc.displ);
 	hash_set_by_index(&enc->displacements, index, 2, value->base_reg);
+	hash_set_by_index(&enc->displacements, index, 3, true );// Is function argument
 }
 
 /**
@@ -1164,10 +1167,30 @@ static lvalue displacements_get(encoder *const enc, const size_t identifier)
 	const size_t displacement = (size_t)hash_get(&enc->displacements, identifier, 1);
 	const mips_register_t base_reg = hash_get(&enc->displacements, identifier, 2);
 	const item_t type = ident_get_type(enc->sx, identifier);
+	const bool is_function_argument = hash_get(&enc->displacements, identifier, 3);
 
 	const lvalue_kind_t kind = (is_register) ? LVALUE_KIND_REGISTER : LVALUE_KIND_STACK;
 
+	if (type_is_array(enc->sx, type) && is_function_argument)
+	{
+		const lvalue array_address_lvalue = (lvalue) { .kind = kind, .base_reg = base_reg, .loc.displ = displacement, .type = TYPE_INTEGER };
+		const rvalue array_address_rvalue = emit_load_of_lvalue(enc, &array_address_lvalue);
+		return (lvalue) {.kind = LVALUE_KIND_STACK, .base_reg = array_address_rvalue.val.reg_num, .loc.displ = 0, .type = type};
+	}
 	return (lvalue) { .kind = kind, .base_reg = base_reg, .loc.displ = displacement, .type = type };
+}
+
+/**
+ *	Is identifier a function argument
+ *
+ *	@param	enc					Encoder
+ *	@param	identifier				Identifier in the table for emitting
+ *
+ *	@return bool defining if the identifier if function argument
+ */
+static bool is_identifier_function_argument(encoder *const enc, const size_t identifier)
+{
+	return hash_get(&enc->displacements, identifier, 3);
 }
 
 /**
