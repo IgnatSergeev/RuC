@@ -1127,7 +1127,7 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
 	hash_set_by_index(&enc->displacements, index, 0, (is_register) ? 1 : 0);
 	hash_set_by_index(&enc->displacements, index, 1, location);
 	hash_set_by_index(&enc->displacements, index, 2, base_reg);
-	hash_set_by_index(&enc->displacements, index, 3, false); // Is function argument
+	hash_set_by_index(&enc->displacements, index, 3, false); // Is give lvalue - address
 
 	if (!is_local)
 	{
