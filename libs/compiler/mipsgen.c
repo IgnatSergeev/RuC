@@ -1143,14 +1143,15 @@ static lvalue displacements_add(encoder *const enc, const size_t identifier, con
  *	@param	enc					Encoder
  *	@param	identifier			Identifier for adding to the table
  *	@param	value				Lvalue for adding to the table
+ *	@param is_lvalue_address    Bool that defines if lvalue is lvalue of the identifier or its lvalue with address on the identifier
  */
-static void displacements_set(encoder *const enc, const size_t identifier, const lvalue *const value)
+static void displacements_set(encoder *const enc, const size_t identifier, const lvalue *const value, bool is_lvalue_address)
 {
 	const size_t index = hash_add(&enc->displacements, identifier, 4);
 	hash_set_by_index(&enc->displacements, index, 0, (value->kind == LVALUE_KIND_REGISTER) ? 1 : 0);
 	hash_set_by_index(&enc->displacements, index, 1, value->loc.displ);
 	hash_set_by_index(&enc->displacements, index, 2, value->base_reg);
-	hash_set_by_index(&enc->displacements, index, 3, true );// Is function argument
+	hash_set_by_index(&enc->displacements, index, 3, is_lvalue_address);
 }
 
 /**
@@ -1167,11 +1168,11 @@ static lvalue displacements_get(encoder *const enc, const size_t identifier)
 	const size_t displacement = (size_t)hash_get(&enc->displacements, identifier, 1);
 	const mips_register_t base_reg = hash_get(&enc->displacements, identifier, 2);
 	const item_t type = ident_get_type(enc->sx, identifier);
-	const bool is_function_argument = hash_get(&enc->displacements, identifier, 3);
+	const bool is_address = hash_get(&enc->displacements, identifier, 3);
 
 	const lvalue_kind_t kind = (is_register) ? LVALUE_KIND_REGISTER : LVALUE_KIND_STACK;
 
-	if (type_is_array(enc->sx, type) && is_function_argument)
+	if (is_address)
 	{
 		const lvalue array_address_lvalue = (lvalue) { .kind = kind, .base_reg = base_reg, .loc.displ = displacement, .type = TYPE_INTEGER };
 		const rvalue array_address_rvalue = emit_load_of_lvalue(enc, &array_address_lvalue);
@@ -1181,14 +1182,14 @@ static lvalue displacements_get(encoder *const enc, const size_t identifier)
 }
 
 /**
- *	Is identifier a function argument
+ *	Is identifier load its address in register in order to calculate expression that uses him
  *
  *	@param	enc					Encoder
- *	@param	identifier				Identifier in the table for emitting
+ *	@param	identifier			Identifier in the table
  *
- *	@return bool defining if the identifier if function argument
+ *	@return bool defining if the identifier loads its address in register
  */
-static bool is_identifier_function_argument(encoder *const enc, const size_t identifier)
+static bool is_identifier_has_address_loaded(encoder *const enc, const size_t identifier)
 {
 	return hash_get(&enc->displacements, identifier, 3);
 }
@@ -2654,8 +2655,8 @@ static rvalue emit_unary_expression(encoder *const enc, const node *const nd)
 			);
 
 			// Очистка регистр занятого под адрес массива
-			if (type_is_array(enc->sx, operand_lvalue.type) && expression_get_class(&operand) == EXPR_IDENTIFIER
-				&& is_identifier_function_argument(enc, expression_identifier_get_id(&operand)))
+			if (expression_get_class(&operand) == EXPR_IDENTIFIER
+				&& is_identifier_has_address_loaded(enc, expression_identifier_get_id(&operand)))
 			{
 				free_register(enc, operand_lvalue.base_reg);
 			}
@@ -2890,8 +2891,8 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 	if (operator == BIN_ASSIGN)
 	{
 		emit_store_of_rvalue(enc, &target, &value);
-		if (type_is_array(enc->sx, target.type) && expression_get_class(&LHS) == EXPR_IDENTIFIER
-			&& is_identifier_function_argument(enc, expression_identifier_get_id(&LHS)))
+		if (expression_get_class(&LHS) == EXPR_IDENTIFIER
+			&& is_identifier_has_address_loaded(enc, expression_identifier_get_id(&LHS)))
 		{
 			free_register(enc, target.base_reg);
 		}
@@ -2948,8 +2949,8 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 	free_rvalue(enc, &value);
 
 	emit_store_of_rvalue(enc, &target, &target_value);
-	if (type_is_array(enc->sx, target.type) && expression_get_class(&LHS) == EXPR_IDENTIFIER
-		&& is_identifier_function_argument(enc, expression_identifier_get_id(&LHS)))
+	if (expression_get_class(&LHS) == EXPR_IDENTIFIER
+		&& is_identifier_has_address_loaded(enc, expression_identifier_get_id(&LHS)))
 	{
 		free_register(enc, target.base_reg);
 	}
@@ -2995,8 +2996,8 @@ static rvalue emit_expression(encoder *const enc, const node *const nd)
 		const rvalue loaded_lval =  emit_load_of_lvalue(enc, &lval);
 
 		// Очистка регистр занятого под адрес массива
-		if (type_is_array(enc->sx, lval.type) && expression_get_class(nd) == EXPR_IDENTIFIER
-			&& is_identifier_function_argument(enc, expression_identifier_get_id(nd)))
+		if (expression_get_class(nd) == EXPR_IDENTIFIER
+			&& is_identifier_has_address_loaded(enc, expression_identifier_get_id(nd)))
 		{
 			free_register(enc, lval.base_reg);
 		}
@@ -3089,8 +3090,8 @@ static rvalue emit_void_expression(encoder *const enc, const node *const nd)
 		const lvalue lvalue = emit_lvalue(enc, nd);
 
 		// Очистка регистр занятого под адрес массива
-		if (type_is_array(enc->sx, lvalue.type) && expression_get_class(nd) == EXPR_IDENTIFIER
-			&& is_identifier_function_argument(enc, expression_identifier_get_id(nd)))
+		if (expression_get_class(nd) == EXPR_IDENTIFIER
+			&& is_identifier_has_address_loaded(enc, expression_identifier_get_id(nd)))
 		{
 			free_register(enc, lvalue.base_reg);
 		}
@@ -3492,7 +3493,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 
 				// Вносим переменную в таблицу символов
 				const lvalue value = {.kind = LVALUE_KIND_REGISTER, .type = type, .loc.reg_num = curr_reg, .base_reg = R_FP };
-				displacements_set(enc, id, &value);
+				displacements_set(enc, id, &value, false);
 			}
 			else
 			{
@@ -3500,7 +3501,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displacement);
 
 				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displacement, .base_reg = R_FP };
-				displacements_set(enc, id, &value);
+				displacements_set(enc, id, &value, false);
 
 				displacement += WORD_LENGTH;
 			}
@@ -3517,7 +3518,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 				uni_printf(enc->sx->io, "\n");
 
 				const lvalue value = {.kind = LVALUE_KIND_REGISTER, .type = type, .loc.reg_num = curr_reg, .base_reg = R_FP };
-				displacements_set(enc, id, &value);
+				displacements_set(enc, id, &value, false);
 			}
 			else
 			{
@@ -3525,7 +3526,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 				uni_printf(enc->sx->io, "is on stack at offset %zu from $fp\n", displacement);
 
 				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = displacement, .base_reg = R_FP };
-				displacements_set(enc, id, &value);
+				displacements_set(enc, id, &value, false);
 
 				displacement += WORD_LENGTH;
 			}
@@ -3543,7 +3544,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 
 				// Вносим переменную в таблицу символов
 				const lvalue value = {.kind = LVALUE_KIND_STACK, .type = type, .loc.displ = 0, .base_reg = curr_reg };
-				displacements_set(enc, id, &value);
+				displacements_set(enc, id, &value, false);
 			}
 			else
 			{
@@ -3553,7 +3554,7 @@ static void emit_function_definition(encoder *const enc, const node *const nd)
 				// Адрес массива на стеке
 				const lvalue address_lvalue = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .loc.displ = displacement, .base_reg = R_FP };
 
-				displacements_set(enc, id, &address_lvalue);
+				displacements_set(enc, id, &address_lvalue, true);
 
 				displacement += WORD_LENGTH;
 			}
