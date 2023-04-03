@@ -337,6 +337,8 @@ static rvalue emit_expression(encoder *const enc, const node *const nd);
 static rvalue emit_void_expression(encoder *const enc, const node *const nd);
 static void emit_structure_init(encoder *const enc, const lvalue *const target, const node *const initializer);
 static void emit_statement(encoder *const enc, const node *const nd);
+static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
+							, const node *const init, const rvalue *const addr);
 
 
 static size_t mips_type_size(const syntax *const sx, const item_t type)
@@ -2672,7 +2674,10 @@ static rvalue emit_array_assignment(encoder *const enc, const lvalue *const targ
 {
 	if (expression_get_class(value) == EXPR_INITIALIZER)	// Присваивание списком
 	{
-		emit_array_init(enc, target, value);
+		const rvalue target_value = emit_load_of_lvalue(enc, target);
+		const node init = declaration_variable_get_initializer(value);
+		emit_array_init(enc, value, 0, &init, &target_value);
+		return target_value;
 	}
 	else	// Присваивание другим массивом
 	{
@@ -2916,17 +2921,6 @@ static rvalue emit_void_expression(encoder *const enc, const node *const nd)
 static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
 	, const node *const init, const rvalue *const addr)
 {
-	if (expression_get_class(nd) == EXPR_IDENTIFIER)
-	{
-		const lvalue initializer_lvalue = emit_lvalue(enc, nd);
-		const rvalue initializer_rvalue = emit_load_of_lvalue(enc, &initializer_lvalue);
-
-		//emit_array_assignment()
-
-		free_rvalue(enc, &initializer_rvalue);
-	}
-
-	// Иначе EXPR_INITIALIZER
 	const size_t amount = expression_initializer_get_size(init);
 
 	// Проверка на соответствие размеров массива и инициализатора
@@ -3114,9 +3108,7 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 	{
 		uni_printf(enc->sx->io, "\n");
 
-		const rvalue variable_value = emit_load_of_lvalue(enc, &variable);
-		const node init = declaration_variable_get_initializer(nd);
-		emit_array_init(enc, nd, 0, &init, &variable_value);
+		const rvalue variable_value = emit_array_assignment(enc, &variable, nd);
 
 		free_rvalue(enc, &variable_value);
 	}
