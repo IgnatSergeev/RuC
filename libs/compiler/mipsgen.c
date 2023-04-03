@@ -2660,6 +2660,59 @@ static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const tar
 }
 
 /**
+ *	Emit array assignment
+ *
+ *	@param	enc					Encoder
+ *	@param	target				Target lvalue
+ *	@param	value				Value to assign to target
+ *
+ *	@return	Rvalue of the result of assignment expression
+ */
+static rvalue emit_array_assignment(encoder *const enc, const lvalue *const target, const node *const value)
+{
+	if (expression_get_class(value) == EXPR_INITIALIZER)	// Присваивание списком
+	{
+		emit_array_init(enc, target, value);
+	}
+	else	// Присваивание другим массивом
+	{
+		// TODO: проверка размеров
+		// FIXME: возврат структуры из функции
+		// FIXME: массив структур
+		const size_t RHS_identifier = expression_identifier_get_id(value);
+		const lvalue RHS_lvalue = displacements_get(enc, RHS_identifier);
+
+		// Копирование всех данных из RHS
+		const item_t type = expression_get_type(value);
+		const size_t array_size = mips_type_size(enc->sx, type);
+		for (size_t i = 0; i < array_size; i += WORD_LENGTH)
+		{
+			// Грузим данные из RHS
+			const lvalue value_word = {
+				.base_reg = RHS_lvalue.base_reg,
+				.loc.displ = RHS_lvalue.loc.displ + i,
+				.kind = LVALUE_KIND_STACK,
+				.type = TYPE_INTEGER
+			};
+			const rvalue proxy = emit_load_of_lvalue(enc, &value_word);
+
+			// Отправляем их в variable
+			const lvalue target_word = {
+				.base_reg = target->base_reg,
+				.kind = LVALUE_KIND_STACK,
+				.loc.displ = target->loc.displ + i,
+				.type = TYPE_INTEGER
+			};
+			emit_store_of_rvalue(enc, &target_word, &proxy);
+
+			free_rvalue(enc, &proxy);
+		}
+	}
+
+	return emit_load_of_lvalue(enc, target);
+}
+
+/**
  *	Emit assignment expression
  *
  *	@param	enc					Encoder
@@ -2674,6 +2727,11 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 
 	const node RHS = expression_assignment_get_RHS(nd);
 	const item_t RHS_type = expression_get_type(&RHS);
+
+	if (type_is_array(enc->sx, RHS_type))
+	{
+		return emit_array_assignment(enc, &target, &RHS);
+	}
 	if (type_is_structure(enc->sx, RHS_type))
 	{
 		return emit_struct_assignment(enc, &target, &RHS);
@@ -2858,6 +2916,17 @@ static rvalue emit_void_expression(encoder *const enc, const node *const nd)
 static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
 	, const node *const init, const rvalue *const addr)
 {
+	if (expression_get_class(nd) == EXPR_IDENTIFIER)
+	{
+		const lvalue initializer_lvalue = emit_lvalue(enc, nd);
+		const rvalue initializer_rvalue = emit_load_of_lvalue(enc, &initializer_lvalue);
+
+		//emit_array_assignment()
+
+		free_rvalue(enc, &initializer_rvalue);
+	}
+
+	// Иначе EXPR_INITIALIZER
 	const size_t amount = expression_initializer_get_size(init);
 
 	// Проверка на соответствие размеров массива и инициализатора
