@@ -2854,27 +2854,25 @@ static rvalue emit_void_expression(encoder *const enc, const node *const nd)
  *	  \/____/   \/_____/   \/_____/   \/_____/   \/_/\/_/   \/_/ /_/   \/_/\/_/     \/_/   \/_/   \/_____/   \/_/ \/_/   \/_____/
  */
 
-
-static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
-	, const node *const init, const rvalue *const addr)
+/**
+ *	Emit comparison of array bound and rvalue
+ *
+ *	@param	enc					Encoder
+ *	@param	core_address		Core array address
+ *	@param	dimension			Dimension to check with
+ *	@param 	initializer_size	Value to compare with
+ *
+ */
+static void emit_array_bound_check(encoder *const enc, const rvalue *const core_address, const size_t dimension, const rvalue *const initializer_size)
 {
-	const size_t amount = expression_initializer_get_size(init);
-
 	// Проверка на соответствие размеров массива и инициализатора
 	uni_printf(enc->sx->io, "\n\t# Check for array and initializer sizes equality:\n");
 
-	const node bound = declaration_variable_get_bound(nd, dimension);
-	const rvalue tmp = emit_expression(enc, &bound);
-	const rvalue bound_rvalue = (tmp.kind == RVALUE_KIND_REGISTER) ? tmp : emit_load_of_immediate(enc, &tmp);
+	const lvalue bound_lvalue = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .base_reg = core_address->val.reg_num,
+								  .loc.displ = (item_t)(dimension * WORD_LENGTH)};
+	const rvalue bound_rvalue = emit_load_of_lvalue(enc, &bound_lvalue);
 
-	// FIXME: через emit_binary_operation()
-	uni_printf(enc->sx->io, "\t");
-	instruction_to_io(enc->sx->io, IC_MIPS_ADDI);
-	uni_printf(enc->sx->io, " ");
-	rvalue_to_io(enc, &bound_rvalue);
-	uni_printf(enc->sx->io, ", ");
-	rvalue_to_io(enc, &bound_rvalue);
-	uni_printf(enc->sx->io, ", %" PRIitem "\n", -(item_t)amount);
+	emit_binary_operation(enc, &bound_rvalue, &bound_rvalue, initializer_size, BIN_SUB);
 
 	uni_printf(enc->sx->io, "\t");
 	instruction_to_io(enc->sx->io, IC_MIPS_BNE);
@@ -2885,8 +2883,26 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 	uni_printf(enc->sx->io, ", error\n");	// FIXME: error согласно RUNTIME'му
 
 	free_rvalue(enc, &bound_rvalue);
+}
 
-	for (size_t i = 0; i < amount; i++)
+/**
+ *	Emit array initialisation by initializer expression
+ *
+ *	@param	enc					Encoder
+ *	@param	core_lvalue			Core array lvalue
+ *	@param	dimension			Dimension to check with
+ *	@param 	initializer_size	Value to compare with
+ *
+ */
+static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
+	, const node *const init, const rvalue *const current_address, const rvalue *const core_address)
+{
+	assert(expression_get_class(init) == EXPR_INITIALIZER);
+	const size_t initializer_size = expression_initializer_get_size(init);
+	const rvalue initializer_size_rvalue = {.kind = RVALUE_KIND_CONST, .from_lvalue = !FROM_LVALUE, .val.int_val = initializer_size, .type = TYPE_INTEGER};
+	emit_array_bound_check(enc, core_address, dimension, &initializer_size_rvalue);
+
+	for (size_t i = 0; i < initializer_size; i++)
 	{
 		const node subexpr = expression_initializer_get_subexpr(init, i);
 		uni_printf(enc->sx->io, "\n");
@@ -2895,7 +2911,7 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 			// Сдвиг адреса на размер массива + 1 (за размер следующего измерения)
 			const mips_register_t reg = get_register(enc);
 			// FIXME: создать отдельные rvalue и lvalue и через emit_load_of_lvalue()
-			to_code_R_I_R(enc->sx->io, IC_MIPS_LW, reg, 0, addr->val.reg_num);	// адрес следующего измерения
+			to_code_R_I_R(enc->sx->io, IC_MIPS_LW, reg, 0, current_address->val.reg_num);	// адрес следующего измерения
 
 			const rvalue next_addr = {
 				.from_lvalue = !FROM_LVALUE,
@@ -2904,31 +2920,35 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 				.type = TYPE_INTEGER
 			};
 
-			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr);
+			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr, core_address);
 
 			// Сдвиг адреса
-			to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, addr->val.reg_num, addr->val.reg_num, -(item_t)WORD_LENGTH);
+			to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, current_address->val.reg_num, current_address->val.reg_num, -(item_t)WORD_LENGTH);
 			uni_printf(enc->sx->io, "\n");
 			free_register(enc, reg);
+		}
+		else if (expression_get_class(&subexpr) == EXPR_IDENTIFIER)
+		{
+
 		}
 		else
 		{
 			const rvalue subexpr_value = emit_expression(enc, &subexpr);	// rvalue элемента
 			const lvalue array_index_value = {
-				.base_reg = addr->val.reg_num,
+				.base_reg = current_address->val.reg_num,
 				.loc.displ = 0,
 				.kind = LVALUE_KIND_STACK,
 				.type = TYPE_INTEGER
 			};
 			emit_store_of_rvalue(enc, &array_index_value, &subexpr_value);
-			lock_register(enc, addr->val.reg_num);
-			if (i != amount - 1)
+			lock_register(enc, current_address->val.reg_num);
+			if (i != initializer_size - 1)
 			{
 				to_code_2R_I(
 					enc->sx->io,
 					IC_MIPS_ADDI,
-					addr->val.reg_num,
-					addr->val.reg_num,
+					current_address->val.reg_num,
+					current_address->val.reg_num,
 					-4
 				);
 			}
@@ -3047,7 +3067,7 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 
 		const rvalue variable_value = emit_load_of_lvalue(enc, &variable);
 		const node init = declaration_variable_get_initializer(nd);
-		emit_array_init(enc, nd, 0, &init, &variable_value);
+		emit_array_init(enc, nd, 0, &init, &variable_value, &variable_value);
 
 		free_rvalue(enc, &variable_value);
 	}
