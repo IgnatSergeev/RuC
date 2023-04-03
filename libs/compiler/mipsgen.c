@@ -2668,6 +2668,7 @@ static rvalue emit_struct_assignment(encoder *const enc, const lvalue *const tar
  *	@param	core_lvalue			Core array lvalue
  *	@param	dimension			Dimension to check with
  *	@param 	initializer_size	Value to compare with
+ *
  */
 static void emit_array_bound_check(encoder *const enc, const lvalue *const core_lvalue, const size_t dimension, const rvalue *const initializer_size)
 {
@@ -2695,8 +2696,10 @@ static void emit_array_bound_check(encoder *const enc, const lvalue *const core_
  *	Emit array assignment
  *
  *	@param	enc					Encoder
- *	@param	target				Target lvalue
- *	@param	value				Value to assign to target
+ *	@param	target_lvalue		Target lvalue
+ *	@param	core_lvalue			lvalue of core array
+ *	@param  initializer 		node with value to initialize
+ *	@param 	dimension			current array dimension
  *
  *	@return	Rvalue of the result of assignment expression
  */
@@ -2716,25 +2719,31 @@ static rvalue emit_array_assignment(encoder *const enc, const lvalue *const targ
 		// Копирование всех данных из RHS
 		const item_t type = expression_get_type(initializer);
 		const size_t array_size = mips_type_size(enc->sx, type);
-		for (size_t i = 0; i < array_size; i += WORD_LENGTH)
+		const item_t element_type = type_array_get_element_type(enc->sx, type);
+		const size_t array_element_size = mips_type_size(enc->sx, element_type);
+		for (size_t i = 0; i < array_size; i += array_element_size)
 		{
 			// Грузим данные из RHS
-			const lvalue value_word = {
+			const lvalue value = {
 				.base_reg = RHS_rvalue.val.reg_num,
 				.loc.displ = i,
 				.kind = LVALUE_KIND_STACK,
-				.type = TYPE_INTEGER
+				.type = element_type
 			};
-			const rvalue proxy = emit_load_of_lvalue(enc, &value_word);
+			const rvalue proxy = emit_load_of_lvalue(enc, &value);
 
 			// Отправляем их в variable
-			const lvalue target_word = {
+			const lvalue target = {
 				.base_reg = target_lvalue->base_reg,
 				.kind = LVALUE_KIND_STACK,
 				.loc.displ = target_lvalue->loc.displ + i,
-				.type = TYPE_INTEGER
+				.type = element_type
 			};
-			emit_store_of_rvalue(enc, &target_word, &proxy);
+			if (type_is_array(enc->sx, element_type))
+			{
+				emit_array_assignment(enc, target, core_lvalue, )
+			}
+			emit_store_of_rvalue(enc, &target, &proxy);
 
 			free_rvalue(enc, &proxy);
 		}
