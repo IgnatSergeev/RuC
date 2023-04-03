@@ -2869,7 +2869,7 @@ static void emit_array_bound_check(encoder *const enc, const rvalue *const core_
 	uni_printf(enc->sx->io, "\n\t# Check for array and initializer sizes equality:\n");
 
 	const lvalue bound_lvalue = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .base_reg = core_address->val.reg_num,
-								  .loc.displ = (item_t)(dimension * WORD_LENGTH)};
+								  .loc.displ = dimension * WORD_LENGTH + WORD_LENGTH};
 	const rvalue bound_rvalue = emit_load_of_lvalue(enc, &bound_lvalue);
 
 	emit_binary_operation(enc, &bound_rvalue, &bound_rvalue, initializer_size, BIN_SUB);
@@ -2886,6 +2886,67 @@ static void emit_array_bound_check(encoder *const enc, const rvalue *const core_
 }
 
 /**
+ *	Emit array -> subarray copying
+ *
+ *	@param	enc						Encoder
+ *	@param	target_lvalue			Lvalue of target array
+ *	@param 	dimension				Current target array dimension
+ *	@param  initializer_lvalue 		Lvalue of source array
+ *  @param 	dim_size 				Number of dimensions in target array
+ *
+ */
+static void emit_array_copying(encoder *const enc, const lvalue *const target_lvalue, const size_t dimension,
+							   const lvalue *const initializer_lvalue, const size_t dim_size)
+{
+	const rvalue target_rvalue = emit_load_of_lvalue(enc, target_lvalue);
+
+	// Bounds checking
+	lvalue initializer_dimension_size = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .loc.displ = initializer_lvalue->loc.displ + WORD_LENGTH, .base_reg = initializer_lvalue->base_reg};
+	const rvalue initializer_rvalue = emit_load_of_lvalue(enc, &initializer_dimension_size);
+	const rvalue word_length_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .val.int_val = WORD_LENGTH, .from_lvalue = !FROM_LVALUE};
+
+	for (size_t i = dimension; i < dim_size; i++)
+	{
+		emit_array_bound_check(enc, &target_rvalue, i, &initializer_rvalue);
+		emit_binary_operation(enc, &initializer_rvalue, &initializer_rvalue, &word_length_rvalue, BIN_ADD);
+	}
+
+	// Сдвигаем target_rvalue чтобы указывал на начало значений у target; initializer_rvalue указывать на начало значений у initializer
+	const rvalue dislacement_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .from_lvalue = !FROM_LVALUE, .val.int_val = dimension * WORD_LENGTH + WORD_LENGTH};
+	emit_binary_operation(enc, &target_rvalue, &target_rvalue, &dislacement_rvalue, BIN_ADD);
+
+	// Копирование всех данных из initializer
+	const item_t type = target_lvalue->type;
+	const size_t array_size = mips_type_size(enc->sx, type);
+
+	for (size_t i = 0; i < array_size; i += WORD_LENGTH)
+	{
+		// Грузим данные из initializer
+		const lvalue value = {
+			.base_reg = initializer_rvalue.val.reg_num,
+			.loc.displ = i,
+			.kind = LVALUE_KIND_STACK,
+			.type = TYPE_INTEGER
+		};
+		const rvalue proxy = emit_load_of_lvalue(enc, &value);
+
+		// Отправляем их в target
+		const lvalue target = {
+			.base_reg = target_rvalue.val.reg_num,
+			.kind = LVALUE_KIND_STACK,
+			.loc.displ = i,
+			.type = TYPE_INTEGER
+		};
+		emit_store_of_rvalue(enc, &target, &proxy);
+
+		free_rvalue(enc, &proxy);
+	}
+
+	free_rvalue(enc, &initializer_rvalue);
+	free_rvalue(enc, &target_rvalue);
+}
+
+/**
  *	Emit array initialisation by initializer expression
  *
  *	@param	enc					Encoder
@@ -2895,7 +2956,7 @@ static void emit_array_bound_check(encoder *const enc, const rvalue *const core_
  *
  */
 static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
-	, const node *const init, const rvalue *const current_address, const rvalue *const core_address)
+	, const node *const init, const rvalue *const current_address, const rvalue *const core_address, const size_t dim_size)
 {
 	assert(expression_get_class(init) == EXPR_INITIALIZER);
 	const size_t initializer_size = expression_initializer_get_size(init);
@@ -2920,7 +2981,7 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 				.type = TYPE_INTEGER
 			};
 
-			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr, core_address);
+			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr, core_address, dim_size);
 
 			// Сдвиг адреса
 			to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, current_address->val.reg_num, current_address->val.reg_num, -(item_t)WORD_LENGTH);
@@ -2929,7 +2990,11 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 		}
 		else if (expression_get_class(&subexpr) == EXPR_IDENTIFIER)
 		{
-
+			const lvalue subexpr_lvalue = emit_lvalue(enc, &subexpr);
+			const lvalue target_subarray = {.kind = LVALUE_KIND_STACK,
+											 .type = type_array_get_element_type(enc->sx, ident_get_type(enc->sx, expression_identifier_get_id(&subexpr))),
+											 .base_reg = current_address->val.reg_num};
+			emit_array_copying(enc, &target_subarray, dimension + 1, &subexpr_lvalue, dim_size);
 		}
 		else
 		{
@@ -3064,12 +3129,23 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 	if (has_init)
 	{
 		uni_printf(enc->sx->io, "\n");
-
-		const rvalue variable_value = emit_load_of_lvalue(enc, &variable);
 		const node init = declaration_variable_get_initializer(nd);
-		emit_array_init(enc, nd, 0, &init, &variable_value, &variable_value);
 
-		free_rvalue(enc, &variable_value);
+		if (expression_get_class(&init) == EXPR_INITIALIZER)
+		{
+			const rvalue variable_value = emit_load_of_lvalue(enc, &variable);
+
+			emit_array_init(enc, nd, 0, &init, &variable_value, &variable_value, dim);
+
+			free_rvalue(enc, &variable_value);
+		}
+		else // Expr_Indentifier
+		{
+			const lvalue initializer_lvalue = emit_lvalue(enc, &init);
+
+			emit_array_copying(enc, &variable, 0, &initializer_lvalue, dim);
+		}
+
 	}
 
 	to_code_2R(enc->sx->io, IC_MIPS_MOVE, R_SP, R_V0);
