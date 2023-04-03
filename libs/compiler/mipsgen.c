@@ -2869,7 +2869,7 @@ static void emit_array_bound_check(encoder *const enc, const rvalue *const core_
 	uni_printf(enc->sx->io, "\n\t# Check for array and initializer sizes equality:\n");
 
 	const lvalue bound_lvalue = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .base_reg = core_address->val.reg_num,
-								  .loc.displ = dimension * WORD_LENGTH + WORD_LENGTH};
+								  .loc.displ = dimension * WORD_LENGTH + ((dimension == 0) ? WORD_LENGTH : 0)};
 	const rvalue bound_rvalue = emit_load_of_lvalue(enc, &bound_lvalue);
 
 	emit_binary_operation(enc, &bound_rvalue, &bound_rvalue, initializer_size, BIN_SUB);
@@ -2899,11 +2899,16 @@ static void emit_array_copying(encoder *const enc, const lvalue *const target_lv
 							   const lvalue *const initializer_lvalue, const size_t dim_size)
 {
 	const rvalue target_rvalue = emit_load_of_lvalue(enc, target_lvalue);
+	const rvalue word_length_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .val.int_val = WORD_LENGTH, .from_lvalue = !FROM_LVALUE};
+	// TODO: исправить подсчеты(размерности только сначала или в середине тоже)
+	if (dimension == 0)
+	{
+		emit_binary_operation(enc, &target_rvalue, &target_rvalue, &word_length_rvalue, BIN_ADD);
+	}
 
 	// Bounds checking
 	lvalue initializer_dimension_size = {.kind = LVALUE_KIND_STACK, .type = TYPE_INTEGER, .loc.displ = initializer_lvalue->loc.displ + WORD_LENGTH, .base_reg = initializer_lvalue->base_reg};
 	const rvalue initializer_rvalue = emit_load_of_lvalue(enc, &initializer_dimension_size);
-	const rvalue word_length_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .val.int_val = WORD_LENGTH, .from_lvalue = !FROM_LVALUE};
 
 	for (size_t i = dimension; i < dim_size; i++)
 	{
@@ -2912,7 +2917,7 @@ static void emit_array_copying(encoder *const enc, const lvalue *const target_lv
 	}
 
 	// Сдвигаем target_rvalue чтобы указывал на начало значений у target; initializer_rvalue указывать на начало значений у initializer
-	const rvalue dislacement_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .from_lvalue = !FROM_LVALUE, .val.int_val = dimension * WORD_LENGTH + WORD_LENGTH};
+	const rvalue dislacement_rvalue = {.kind = RVALUE_KIND_CONST, .type = TYPE_INTEGER, .from_lvalue = !FROM_LVALUE, .val.int_val = dimension * WORD_LENGTH};
 	emit_binary_operation(enc, &target_rvalue, &target_rvalue, &dislacement_rvalue, BIN_ADD);
 
 	// Копирование всех данных из initializer
@@ -2971,17 +2976,10 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 		{
 			// Сдвиг адреса на размер массива + 1 (за размер следующего измерения)
 			const mips_register_t reg = get_register(enc);
-			// FIXME: создать отдельные rvalue и lvalue и через emit_load_of_lvalue()
-			to_code_R_I_R(enc->sx->io, IC_MIPS_LW, reg, 0, current_address->val.reg_num);	// адрес следующего измерения
+			const lvalue next_addr_lvalue = {.kind = LVALUE_KIND_STACK, .type = expression_get_type(&subexpr), .base_reg = current_address->val.reg_num, .loc.displ = 0};
+			const rvalue next_addr_rvalue = emit_load_of_lvalue(enc, &next_addr_lvalue);
 
-			const rvalue next_addr = {
-				.from_lvalue = !FROM_LVALUE,
-				.kind = RVALUE_KIND_REGISTER,
-				.val.reg_num = reg,
-				.type = TYPE_INTEGER
-			};
-
-			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr, core_address, dim_size);
+			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr_rvalue, core_address, dim_size);
 
 			// Сдвиг адреса
 			to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, current_address->val.reg_num, current_address->val.reg_num, -(item_t)WORD_LENGTH);
