@@ -337,7 +337,10 @@ static rvalue emit_expression(encoder *const enc, const node *const nd);
 static rvalue emit_void_expression(encoder *const enc, const node *const nd);
 static void emit_structure_init(encoder *const enc, const lvalue *const target, const node *const initializer);
 static void emit_statement(encoder *const enc, const node *const nd);
-
+static void emit_array_init(encoder *const enc, const size_t dimension
+							, const node *const init, const rvalue *const current_address, const rvalue *const core_address, const size_t dim_size);
+static void emit_array_copying(encoder *const enc, const lvalue *const target_lvalue, const size_t dimension,
+							   const lvalue *const initializer_lvalue, const size_t dim_size);
 
 static size_t mips_type_size(const syntax *const sx, const item_t type)
 {
@@ -2678,7 +2681,22 @@ static rvalue emit_assignment_expression(encoder *const enc, const node *const n
 	{
 		return emit_struct_assignment(enc, &target, &RHS);
 	}
-
+	if (type_is_array(enc->sx, RHS_type))
+	{
+		if (expression_get_class(&RHS) == EXPR_INITIALIZER)
+		{
+			const rvalue target_rvalue = emit_load_of_lvalue(enc, &target);
+			emit_array_init(enc, 0, &RHS, &target_rvalue, &target_rvalue, 2);
+			return target_rvalue;
+		}
+		else
+		{
+			const lvalue initializer_lvalue = emit_lvalue(enc, &RHS);
+			// очитска если аргумент передающийся адресом
+			emit_array_copying(enc, &target, 0, &initializer_lvalue, 2);
+			return emit_load_of_lvalue(enc, &target);
+		}
+	}
 	const rvalue value = emit_expression(enc, &RHS);
 
 	const binary_t operator = expression_assignment_get_operator(nd);
@@ -2960,7 +2978,7 @@ static void emit_array_copying(encoder *const enc, const lvalue *const target_lv
  *	@param 	initializer_size	Value to compare with
  *
  */
-static void emit_array_init(encoder *const enc, const node *const nd, const size_t dimension
+static void emit_array_init(encoder *const enc, const size_t dimension
 	, const node *const init, const rvalue *const current_address, const rvalue *const core_address, const size_t dim_size)
 {
 	assert(expression_get_class(init) == EXPR_INITIALIZER);
@@ -2979,7 +2997,7 @@ static void emit_array_init(encoder *const enc, const node *const nd, const size
 			const lvalue next_addr_lvalue = {.kind = LVALUE_KIND_STACK, .type = expression_get_type(&subexpr), .base_reg = current_address->val.reg_num, .loc.displ = 0};
 			const rvalue next_addr_rvalue = emit_load_of_lvalue(enc, &next_addr_lvalue);
 
-			emit_array_init(enc, nd, dimension + 1, &subexpr, &next_addr_rvalue, core_address, dim_size);
+			emit_array_init(enc, dimension + 1, &subexpr, &next_addr_rvalue, core_address, dim_size);
 
 			// Сдвиг адреса
 			to_code_2R_I(enc->sx->io, IC_MIPS_ADDI, current_address->val.reg_num, current_address->val.reg_num, -(item_t)WORD_LENGTH);
@@ -3133,7 +3151,7 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 		{
 			const rvalue variable_value = emit_load_of_lvalue(enc, &variable);
 
-			emit_array_init(enc, nd, 0, &init, &variable_value, &variable_value, dim);
+			emit_array_init(enc, 0, &init, &variable_value, &variable_value, dim);
 
 			free_rvalue(enc, &variable_value);
 		}
