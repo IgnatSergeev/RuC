@@ -1333,7 +1333,15 @@ static void emit_initializer(encoder *const enc, const node *const nd)
 	for (size_t i = 0; i < size; i++)
 	{
 		const node subexpr = expression_initializer_get_subexpr(nd, i);
-		emit_expression(enc, &subexpr);
+		if (expression_get_class(&subexpr) == EXPR_IDENTIFIER
+			&& type_is_array(enc->sx, expression_get_type(&subexpr)))
+		{
+			array_load_initializer(enc, &subexpr);
+		}
+		else
+		{
+			emit_expression(enc, &subexpr);
+		}
 	}
 }
 
@@ -1521,8 +1529,14 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 	if (has_initializer)
 	{
 		const node initializer = declaration_variable_get_initializer(nd);
-		emit_expression(enc, &initializer);
-
+		if (expression_get_class(&initializer) == EXPR_IDENTIFIER)
+		{
+			array_load_initializer(enc, &initializer);
+		}
+		else
+		{
+			emit_expression(enc, &initializer);
+		}
 		if (only_strings(enc, &initializer))
 		{
 			usual += 2;
