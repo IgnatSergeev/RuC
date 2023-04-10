@@ -1240,11 +1240,11 @@ static void emit_assignment_expression(encoder *const enc, const node *const nd)
 	const lvalue value = emit_lvalue(enc, &LHS);
 
 	const node RHS = expression_assignment_get_RHS(nd);
-	emit_expression(enc, &RHS);
 
 	const item_t type = expression_get_type(nd);
 	if (type_is_structure(enc->sx, type))
 	{
+		emit_expression(enc, &RHS);
 		if (value.kind == VARIABLE)
 		{
 			mem_add(enc, IC_COPY0ST_ASSIGN);
@@ -1292,6 +1292,7 @@ static void emit_assignment_expression(encoder *const enc, const node *const nd)
 	}
 	else // Скалярное присваивание
 	{
+		emit_expression(enc, &RHS);
 		const binary_t op = expression_assignment_get_operator(nd);
 		instruction_t instruction = binary_to_instruction(op);
 		if (value.kind == ADDRESS)
