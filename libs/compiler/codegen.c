@@ -1418,6 +1418,43 @@ static void emit_array_declaration(encoder *const enc, const node *const nd)
 	}
 }
 
+static void emit_struct_initialization(encoder *const enc, const item_t struct_type, const size_t displacement, const node *const initializer) {
+	size_t member_amount = type_structure_get_member_amount(enc->sx, struct_type);
+	size_t current_member_displacement = displacement;
+	for (size_t i = 0; i < member_amount; i++) {
+		item_t member_type = type_structure_get_member_type(enc->sx, struct_type, i);
+		const node sub_initializer = expression_initializer_get_subexpr(initializer, i);
+		if (type_is_structure(enc->sx, member_type)) {
+			emit_struct_initialization(enc, member_type, current_member_displacement, &sub_initializer);
+		} else if (type_is_array(enc->sx, member_type)) {
+			item_t dimensions = 0;
+			while (type_is_array(enc->sx, member_type))
+			{
+				member_type = type_array_get_element_type(enc->sx, member_type);
+				dimensions++;
+			}
+			emit_expression(enc, &sub_initializer);
+
+			item_t usual = 1; // has empty bounds?
+			if (only_strings(enc, &sub_initializer))
+			{
+				usual += 2;
+			}
+
+			const item_t length = (item_t)type_size(enc->sx, member_type);
+			mem_add(enc, IC_ARR_INIT);
+			mem_add(enc, dimensions);
+			mem_add(enc, length);
+			mem_add(enc, current_member_displacement);
+			mem_add(enc, usual);
+		} else { // if pointer
+			mem_add(enc, type_is_floating(enc->sx, member_type) ? IC_ASSIGN_R_V : IC_ASSIGN_V);
+			mem_add(enc, current_member_displacement);
+		}
+		current_member_displacement += type_size(enc->sx, member_type);
+	}
+}
+
 /**
  *	Emit variable declaration
  *
@@ -1450,9 +1487,7 @@ static void emit_variable_declaration(encoder *const enc, const node *const nd)
 
 		if (type_is_structure(enc->sx, type))
 		{
-			mem_add(enc, IC_COPY0ST_ASSIGN);
-			mem_add(enc, displ);
-			mem_add(enc, (item_t)type_size(enc->sx, type));
+			emit_struct_initialization(enc, type, displ, &initializer);
 		}
 		else
 		{
