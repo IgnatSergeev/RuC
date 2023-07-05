@@ -849,17 +849,20 @@ static ir_label ir_label_load(const vector *const tree, const item_t id)
 
 typedef node ir_block;
 
-static ir_basic_block create_ir_block(const node *const nd)
+static ir_block create_ir_block(const node *const nd)
 {
-   ir_block_ block = node_add_child(nd, 0);
-   return block;
+	ir_block block = node_add_child(nd, 0);
+   	return block;
 }
 
 static size_t ir_block_get_instr_count(const ir_block *const block)
 {
    return node_get_amount(block);
 }
-
+static ir_instr ir_block_index_instr(const ir_block *const block, size_t idx)
+{
+	return node_get_child(block, idx);
+}
 
 // Функции.
 
@@ -882,9 +885,13 @@ static ir_function create_ir_function(const node *const nd, const item_t id, con
    return function;
 }
 
-static ir_block ir_function_get_block(const ir_function *const function)
+static size_t ir_function_get_block_count(const ir_function *const function)
 {
-   return node_get_child(function, 0);
+	return node_get_amount(function);
+}
+static ir_block ir_function_index_block(const ir_function *const function, size_t idx)
+{
+	return node_get_child(function, idx);
 }
 
 static item_t ir_function_get_id(const ir_function *const function)
@@ -1082,6 +1089,11 @@ static ir_function ir_get_current_function(const ir_builder *const builder)
 {
    return ir_get_function(builder, builder->function);
 }
+static ir_function ir_get_current_block(const ir_builder *const builder)
+{
+	ir_function function = ir_get_current_function(builder);
+	return ir_function_index_block(&function, ir_function_get_block_count(&function) - 1);
+}
 
 static size_t ir_locals_get(const ir_builder *const builder)
 {
@@ -1228,12 +1240,18 @@ static item_t ir_add_label(ir_builder *const builder, const ir_label_kind kind)
    return ir_label_save(&label_);
 }
 
-// Функции построения инструкций.
+// Функции построения инструкций и блоков.
 
 static void ir_build_instr(ir_builder *const builder, const ir_ic ic, const item_t op1, const item_t op2, const item_t res)
 {
-   ir_function function = ir_get_current_function(builder);
-   create_ir_instr(&function, ic, op1, op2, res);
+   ir_block block = ir_get_current_block(builder);
+   create_ir_instr(&block, ic, op1, op2, res);
+}
+
+static void ir_build_block(ir_builder *const builder)
+{
+	ir_function function = ir_get_current_function(builder);
+	create_ir_block(&function);
 }
 
 static void ir_build_nop(ir_builder *const builder)
@@ -1302,6 +1320,7 @@ static item_t ir_build_ptr(ir_builder *const builder, const item_t type, const i
 
 static void ir_build_label(ir_builder *const builder, const item_t label)
 {
+	ir_build_block(builder);
    ir_build_instr(builder, IR_IC_LABEL, label, IR_VALUE_VOID, IR_VALUE_VOID);
 }
 
@@ -1380,26 +1399,32 @@ static item_t ir_build_shr(ir_builder *const builder, const item_t lhs, const it
 static void ir_build_jmp(ir_builder *const builder, const item_t label)
 {
    ir_build_instr(builder, IR_IC_JMP, label, IR_VALUE_VOID, IR_VALUE_VOID);
+   ir_build_block(builder);
 }
 static void ir_build_jmpnz(ir_builder *const builder, const item_t label, const item_t cond)
 {
    ir_build_instr(builder, IR_IC_JMPNZ, label, cond, IR_VALUE_VOID);
+   ir_build_block(builder);
 }
 static void ir_build_jmpz(ir_builder *const builder, const item_t label, const item_t cond)
 {
    ir_build_instr(builder, IR_IC_JMPZ, label, cond, IR_VALUE_VOID);
+   ir_build_block(builder);
 }
 static void ir_build_jmpeq(ir_builder *const builder, const item_t label, const item_t lhs, const item_t rhs)
 {
    ir_build_instr(builder, IR_IC_JMPEQ, label, lhs, rhs);
+   ir_build_block(builder);
 }
 static void ir_build_jmplt(ir_builder *const builder, const item_t label, const item_t lhs, const item_t rhs)
 {
    ir_build_instr(builder, IR_IC_JMPLT, label, lhs, rhs);
+   ir_build_block(builder);
 }
 static void ir_build_jmple(ir_builder *const builder, const item_t label, const item_t lhs, const item_t rhs)
 {
    ir_build_instr(builder, IR_IC_JMPLE, label, lhs, rhs);
+   ir_build_block(builder);
 }
 
 static item_t ir_build_itof(ir_builder *const builder, const item_t value)
@@ -1424,6 +1449,7 @@ static item_t ir_build_call(ir_builder *const builder, const item_t value)
 {
    const item_t res = ir_build_temp(builder, TYPE_INTEGER);
    ir_build_instr(builder, IR_IC_CALL, value, IR_VALUE_VOID, res);
+   ir_build_block(builder);
    return res;
 }
 static void ir_build_ret(ir_builder *const builder, const item_t value)
@@ -1431,16 +1457,11 @@ static void ir_build_ret(ir_builder *const builder, const item_t value)
    ir_build_instr(builder, IR_IC_RET, value, IR_VALUE_VOID, IR_VALUE_VOID);
 }
 
-static void ir_build_block(ir_builder *const builder)
-{
-   ir_function function = ir_get_current_function(builder);
-   create_ir_block(&function);
-}
-
 static void ir_build_function_definition(ir_builder *const builder, const item_t id, const item_t type)
 {
    ir_function function = create_ir_function(&builder->module->functions_root, id, type);
    builder->function = ir_function_save(&function);
+   ir_build_block(builder);
 }
 
 // Отладка.
@@ -1981,6 +2002,19 @@ static void ir_dump_instr(const ir_builder *const builder, const ir_instr *const
    }
 }
 
+static void ir_dump_block(const ir_builder *const builder, const ir_block *const block)
+{
+	ir_dumpf("block\n");
+
+	ir_dumpf("{\n");
+	for (size_t i = 0; i < ir_block_get_instr_count(block); i++)
+	{
+		const ir_instr instr = ir_block_index_instr(block, i);
+		ir_dump_instr(builder, &instr);
+	}
+	ir_dumpf("}\n");
+}
+
 static void ir_dump_extern(const ir_builder *const builder, const ir_extern *const extern_)
 {
    const item_t id = ir_extern_get_id(extern_);
@@ -2013,10 +2047,10 @@ static void ir_dump_function(const ir_builder *const builder, const ir_function 
    ir_dumpf("\n");
 
    ir_dumpf("{\n");
-   for (size_t i = 0; i < ir_block_get_instr_count(ir_function_get_block(function)); i++)
+   for (size_t i = 0; i < ir_function_get_block_count(function); i++)
    {
-	   const ir_instr instr = ir_function_index_instr(function, i);
-	   ir_dump_instr(builder, &instr);
+	   const ir_block block = ir_function_index_block(function, i);
+	   ir_dump_block(builder, &block);
    }
    ir_dumpf("}\n");
 }
@@ -3900,6 +3934,14 @@ static void ir_gen_instr(ir_context *const ctx, const ir_instr *const instr)
 		   break;
    }
 }
+static void ir_gen_block(ir_context *const ctx, const ir_block *const block)
+{
+	for (size_t i = 0; i < ir_block_get_instr_count(block); i++)
+	{
+		ir_instr instr = ir_block_index_instr(block, i);
+		ir_gen_instr(ctx, &instr);
+	}
+}
 static void ir_gen_extern(ir_context *const ctx, const ir_extern *const extern_)
 {
    void *const enc = ctx->enc;
@@ -3923,10 +3965,10 @@ static void ir_gen_function(ir_context *const ctx, const ir_function *const func
    const function_data data = ir_function_to_data(function);
 
    ir_get_function_begin_gen(ctx)(enc, &data);
-   for (size_t i = 0; i < ir_function_get_instr_count(function); i++)
+   for (size_t i = 0; i < ir_function_get_block_count(function); i++)
    {
-	   ir_instr instr = ir_function_index_instr(function, i);
-	   ir_gen_instr(ctx, &instr);
+	   ir_block block = ir_function_index_block(function, i);
+	   ir_gen_block(ctx, &block);
    }
    ir_get_function_end_gen(ctx)(enc, &data);
 }
