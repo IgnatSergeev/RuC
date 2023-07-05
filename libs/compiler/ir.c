@@ -1460,8 +1460,8 @@ static void ir_build_ret(ir_builder *const builder, const item_t value)
 static void ir_build_function_definition(ir_builder *const builder, const item_t id, const item_t type)
 {
    ir_function function = create_ir_function(&builder->module->functions_root, id, type);
-   builder->function = ir_function_save(&function);
    ir_build_block(builder);
+   builder->function = ir_function_save(&function);
 }
 
 // Отладка.
