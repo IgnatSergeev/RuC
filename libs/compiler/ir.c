@@ -773,6 +773,9 @@ static ir_instr create_ir_instr(const node *const nd, const ir_ic ic, const item
    node_add_arg(&instr, op1);
    node_add_arg(&instr, op2);
    node_add_arg(&instr, res);
+   node_add_arg(&instr, -1);
+   node_add_arg(&instr, -1);
+   node_add_arg(&instr, -1);
    return instr;
 }
 
@@ -799,6 +802,39 @@ static item_t ir_instr_get_op3(const ir_instr *const instr)
 static item_t ir_instr_get_res(const ir_instr *const instr)
 {
    return ir_instr_get_op3(instr);
+}
+
+static size_t ir_instr_set_op1_next_use(const ir_instr *const instr, const size_t next_use)
+{
+	return node_set_arg(instr, 4, next_use);
+}
+static size_t ir_instr_set_op2_next_use(const ir_instr *const instr, const size_t next_use)
+{
+	return node_set_arg(instr, 5, next_use);
+}
+static size_t ir_instr_set_op3_next_use(const ir_instr *const instr, const size_t next_use)
+{
+	return node_set_arg(instr, 6, next_use);
+}
+static item_t ir_instr_set_res_next_use(const ir_instr *const instr, const size_t next_use)
+{
+	return ir_instr_set_op3_next_use(instr, next_use);
+}
+static size_t ir_instr_get_op1_next_use(const ir_instr *const instr)
+{
+	return node_get_arg(instr, 4);
+}
+static size_t ir_instr_get_op2_next_use(const ir_instr *const instr)
+{
+	return node_get_arg(instr, 5);
+}
+static size_t ir_instr_get_op3_next_use(const ir_instr *const instr)
+{
+	return node_get_arg(instr, 6);
+}
+static size_t ir_instr_get_res_next_use(const ir_instr *const instr)
+{
+	return ir_instr_get_op3_next_use(instr);
 }
 
 // Метки.
@@ -1283,7 +1319,8 @@ static item_t ir_build_alloca(ir_builder *const builder, const item_t type)
    const syntax *const sx = builder->sx;
 
    const item_t res = ir_build_local(builder, type);
-   ir_build_instr(builder, IR_IC_ALLOCA, type_size(sx, type) * 4, IR_VALUE_VOID, res);
+   const item_t size = ir_build_imm_int(builder, type_size(sx, type) * 4);
+   ir_build_instr(builder, IR_IC_ALLOCA, size, IR_VALUE_VOID, res);
 
    return res;
 }
@@ -3356,6 +3393,82 @@ void ir_emit_module(ir_builder *const builder, const node *const nd)
    }
 
    // FIXME: Обработка ошибок.
+}
+
+void ir_block_calculate_next_use(ir_block *const block)
+{
+	vector next_use = vector_create(IR_VALUES_SIZE);
+	for (size_t i = 0; i < IR_VALUES_SIZE; i++)
+	{
+		vector_set(&next_use, i, -1);
+	}
+	for (size_t i = ir_block_get_instr_count(block); i >= 0; i--)
+	{
+		const ir_instr instr = ir_block_index_instr(block, i);
+		switch (ir_instr_get_kind(&instr))
+		{
+			case IR_INSTR_KIND_N:
+				break;
+			case IR_INSTR_KIND_RN:
+			case IR_INSTR_KIND_BN:
+				ir_instr_set_op1_next_use(&instr, vector_get(&next_use, ir_instr_get_op1(&instr)));
+				vector_set(&next_use, ir_instr_get_op1(&instr), i);
+				break;
+			case IR_INSTR_KIND_RR:
+			case IR_INSTR_KIND_LR:
+			case IR_INSTR_KIND_SL:
+			case IR_INSTR_KIND_FR:
+				ir_instr_set_op1_next_use(&instr, vector_get(&next_use, ir_instr_get_op1(&instr)));
+				ir_instr_set_res_next_use(&instr, vector_get(&next_use, ir_instr_get_res(&instr)));
+				vector_set(&next_use, ir_instr_get_res(&instr), -1);
+				vector_set(&next_use, ir_instr_get_op1(&instr), i);
+				break;
+			case IR_INSTR_KIND_RRN:
+			case IR_INSTR_KIND_RLN:
+			case IR_INSTR_KIND_BRN:
+				ir_instr_set_op1_next_use(&instr, vector_get(&next_use, ir_instr_get_op1(&instr)));
+				ir_instr_set_op2_next_use(&instr, vector_get(&next_use, ir_instr_get_op2(&instr)));
+				vector_set(&next_use, ir_instr_get_op1(&instr), i);
+				vector_set(&next_use, ir_instr_get_op2(&instr), i);
+				break;
+			case IR_INSTR_KIND_RRR:
+			case IR_INSTR_KIND_BRRN:
+				ir_instr_set_op1_next_use(&instr, vector_get(&next_use, ir_instr_get_op1(&instr)));
+				ir_instr_set_op2_next_use(&instr, vector_get(&next_use, ir_instr_get_op2(&instr)));
+				ir_instr_set_res_next_use(&instr, vector_get(&next_use, ir_instr_get_res(&instr)));
+				vector_set(&next_use, ir_instr_get_res(&instr), -1);
+				vector_set(&next_use, ir_instr_get_op1(&instr), i);
+				vector_set(&next_use, ir_instr_get_op2(&instr), i);
+				break;
+			default:
+				unreachable();
+				break;
+		}
+	}
+}
+
+void ir_optimize_block(ir_block *const block)
+{
+	ir_block_calculate_next_use(block);
+}
+
+void ir_optimize_function(ir_function *const function)
+{
+	// TODO: global optimizations
+	for (size_t i = 0; i < ir_function_get_block_count(function); i++)
+	{
+		ir_block block = ir_function_index_block(function, i);
+		ir_optimize_block(&block);
+	}
+}
+
+void ir_optimize_module(ir_module *const module)
+{
+	for (size_t i = 0; i < ir_module_get_function_count(module); i++)
+	{
+		ir_function function = ir_module_index_function(module, i);
+		ir_optimize_function(&function);
+	}
 }
 
 // Обход IR дерева.
