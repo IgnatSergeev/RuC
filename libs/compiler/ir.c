@@ -3447,12 +3447,29 @@ void ir_block_calculate_next_use(ir_block *const block)
 	}
 }
 
-void ir_optimize_block(ir_block *const block)
+static void ir_optimize_block(ir_block *const block)
 {
 	ir_block_calculate_next_use(block);
+	vector instructions = vector_create(ir_block_get_instr_count(block));
+	node instr_root = node_get_root(&instructions);
+	for (size_t i = ir_block_get_instr_count(block); i >= 0; i--)
+	{
+		ir_instr instr = ir_block_index_instr(block, i);
+		switch (ir_instr_get_kind(&instr))
+		{
+			case IR_INSTR_KIND_N:
+			{
+				create_ir_instr()
+				break;
+			}
+			case IR_INSTR_KIND_RN:
+			case IR_INSTR_KIND_BN:
+		}
+	}
+
 }
 
-void ir_optimize_function(ir_function *const function)
+static void ir_optimize_function(ir_function *const function)
 {
 	// TODO: global optimizations
 	for (size_t i = 0; i < ir_function_get_block_count(function); i++)
