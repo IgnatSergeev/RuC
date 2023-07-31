@@ -28,6 +28,7 @@
 #include "operations.h"
 #include "syntax.h"
 #include "tree.h"
+#include "map.h"
 
 
 // Утилиты.
@@ -364,7 +365,17 @@ bool function_data_is_leaf(const function_data *const data)
    return data->is_leaf;
 }
 
+typedef enum ir_node_kind
+{
+	IR_BLOCK,
+	IR_INSTR,
+	IR_VALUE
+} ir_node_kind;
 
+static ir_node_kind ir_node_get_kind(const node *const nd)
+{
+	return node_get_type(nd);
+}
 
 // Значения.
 
@@ -383,7 +394,8 @@ static const item_t IR_VALUE_VOID = -1;
 
 static ir_value create_ir_value(const node *const nd, const ir_value_kind kind, const item_t type)
 {
-   const ir_value value = node_add_child(nd, kind);
+   const ir_value value = node_add_child(nd, IR_VALUE);
+   node_add_arg(&value, kind);
    node_add_arg(&value, type);
    return value;
 }
@@ -454,63 +466,76 @@ static ir_value create_ir_global_value_with_displ(const node *const nd, const it
 
 static ir_value_kind ir_value_get_kind(const ir_value *const value)
 {
-   return node_get_type(value);
+	assert(ir_node_get_kind(value) == IR_VALUE);
+    return node_get_arg(value, 0);
 }
 
 static bool ir_value_is_temp(const ir_value *const value)
 {
-   return ir_value_get_kind(value) == IR_VALUE_KIND_TEMP;
+	assert(ir_node_get_kind(value) == IR_VALUE);
+    return ir_value_get_kind(value) == IR_VALUE_KIND_TEMP;
 }
 static bool ir_value_is_imm(const ir_value *const value)
 {
-   return ir_value_get_kind(value) == IR_VALUE_KIND_IMM;
+	assert(ir_node_get_kind(value) == IR_VALUE);
+    return ir_value_get_kind(value) == IR_VALUE_KIND_IMM;
 }
 
 static item_t ir_value_get_type(const ir_value *const value)
 {
-   return node_get_arg(value, 0);
+	assert(ir_node_get_kind(value) == IR_VALUE);
+    return node_get_arg(value, 1);
 }
 
 static int ir_imm_value_get_int(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_IMM);
+    return node_get_arg(value, 2);
 }
 static float ir_imm_value_get_float(const ir_value *const value)
 {
-   return node_get_arg_double(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_IMM);
+    return node_get_arg_double(value, 2);
 }
 static size_t ir_imm_value_get_string(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_IMM);
+    return node_get_arg(value, 2);
 }
 
 static item_t ir_temp_value_get_id(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_TEMP);
+    return node_get_arg(value, 2);
 }
 
 static item_t ir_local_value_get_dipsl(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_LOCAL);
+    return node_get_arg(value, 2);
 }
 
 static size_t ir_param_value_get_num(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_PARAM);
+    return node_get_arg(value, 2);
 }
 
 static size_t ir_param_value_get_displ(const ir_value *const value)
 {
-   return node_get_arg(value, 2);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_PARAM);
+    return node_get_arg(value, 3);
 }
 
 static size_t ir_global_value_get_id(const ir_value *const value)
 {
-   return node_get_arg(value, 1);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_GLOBAL);
+    return node_get_arg(value, 2);
 }
 static size_t ir_global_value_get_displ(const ir_value *const value)
 {
-   return node_get_arg(value, 2);
+	assert(ir_value_get_type(value) == IR_VALUE_KIND_GLOBAL);
+    return node_get_arg(value, 3);
 }
 
 const char* ir_global_value_get_spelling(const ir_value *const value, const syntax *const sx)
@@ -767,12 +792,13 @@ static ir_instr_kind ir_instr_kind_from_ic(const ir_ic ic)
 
 typedef node ir_instr;
 
-static ir_instr create_ir_instr(const node *const nd, const ir_ic ic, const item_t op1, const item_t op2, const item_t res)
+static ir_instr create_ir_instr(const node *const nd, const ir_ic ic, const item_t op1, const item_t op2, const item_t op3)
 {
-   ir_instr instr = node_add_child(nd, ic);
+   ir_instr instr = node_add_child(nd, IR_INSTR);
+   node_add_arg(&instr, ic);
    node_add_arg(&instr, op1);
    node_add_arg(&instr, op2);
-   node_add_arg(&instr, res);
+   node_add_arg(&instr, op3);
    node_add_arg(&instr, -1);
    node_add_arg(&instr, -1);
    node_add_arg(&instr, -1);
@@ -781,113 +807,74 @@ static ir_instr create_ir_instr(const node *const nd, const ir_ic ic, const item
 
 static ir_ic ir_instr_get_ic(const ir_instr *const instr)
 {
-   return node_get_type(instr);
+	assert(ir_value_get_type(instr) == IR_INSTR);
+    return node_get_arg(instr, 0);
 }
 static ir_instr_kind ir_instr_get_kind(const ir_instr *const instr)
 {
-   return ir_instr_kind_from_ic(ir_instr_get_ic(instr));
+	assert(ir_value_get_type(instr) == IR_INSTR);
+    return ir_instr_kind_from_ic(ir_instr_get_ic(instr));
 }
 static item_t ir_instr_get_op1(const ir_instr *const instr)
 {
-   return node_get_arg(instr, 0);
+	assert(ir_value_get_type(instr) == IR_INSTR);
+    return node_get_arg(instr, 1);
 }
 static item_t ir_instr_get_op2(const ir_instr *const instr)
 {
-   return node_get_arg(instr, 1);
+	assert(ir_value_get_type(instr) == IR_INSTR);
+    return node_get_arg(instr, 2);
 }
 static item_t ir_instr_get_op3(const ir_instr *const instr)
 {
-   return node_get_arg(instr, 2);
-}
-static item_t ir_instr_get_res(const ir_instr *const instr)
-{
-   return ir_instr_get_op3(instr);
+	assert(ir_value_get_type(instr) == IR_INSTR);
+    return node_get_arg(instr, 3);
 }
 
 static size_t ir_instr_set_op1_next_use(const ir_instr *const instr, const size_t next_use)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_set_arg(instr, 4, next_use);
 }
 static size_t ir_instr_set_op2_next_use(const ir_instr *const instr, const size_t next_use)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_set_arg(instr, 5, next_use);
 }
 static size_t ir_instr_set_op3_next_use(const ir_instr *const instr, const size_t next_use)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_set_arg(instr, 6, next_use);
 }
-static item_t ir_instr_set_res_next_use(const ir_instr *const instr, const size_t next_use)
-{
-	return ir_instr_set_op3_next_use(instr, next_use);
-}
+
 static size_t ir_instr_get_op1_next_use(const ir_instr *const instr)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_get_arg(instr, 4);
 }
 static size_t ir_instr_get_op2_next_use(const ir_instr *const instr)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_get_arg(instr, 5);
 }
 static size_t ir_instr_get_op3_next_use(const ir_instr *const instr)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return node_get_arg(instr, 6);
 }
 static size_t ir_instr_get_res_next_use(const ir_instr *const instr)
 {
+	assert(ir_value_get_type(instr) == IR_INSTR);
 	return ir_instr_get_op3_next_use(instr);
 }
 
-// Метки.
-
-typedef enum ir_label_kind
-{
-   IR_LABEL_KIND_BEGIN,
-   IR_LABEL_KIND_THEN,
-   IR_LABEL_KIND_ELSE,
-   IR_LABEL_KIND_END,
-   IR_LABEL_KIND_BEGIN_CYCLE,
-   IR_LABEL_KIND_NEXT,
-   IR_LABEL_KIND_AND,
-   IR_LABEL_KIND_OR,
-   IR_LABEL_KIND_CASE
-} ir_label_kind;
-
-typedef node ir_label;
-
-const item_t IR_LABEL_NULL = -1;
-
-static ir_label create_ir_label(const node *const nd, ir_label_kind kind)
-{
-   static item_t id = 0;
-
-   ir_label label_ = node_add_child(nd, kind);
-   node_add_arg(&label_, ++id);
-   return label_;
-}
-
-static ir_label_kind ir_label_get_kind(const ir_label *const label)
-{
-   return node_get_type(label);
-}
-static item_t ir_label_get_id(const ir_label *const label)
-{
-   return node_get_arg(label, 0);
-}
-
-static item_t ir_label_save(const ir_label *const label)
-{
-   return node_save(label);
-}
-static ir_label ir_label_load(const vector *const tree, const item_t id)
-{
-   return node_load(tree, id);
-}
+// Базовые блоки
 
 typedef node ir_block;
 
 static ir_block create_ir_block(const node *const nd)
 {
-	ir_block block = node_add_child(nd, 0);
+	ir_block block = node_add_child(nd, IR_BLOCK);
    	return block;
 }
 
@@ -1003,12 +990,6 @@ ir_module create_ir_module()
    module.functions = vector_create(IR_FUNCTIONS_SIZE);
    module.functions_root = node_get_root(&module.functions);
 
-   module.values = vector_create(IR_VALUES_SIZE);
-   module.values_root = node_get_root(&module.values);
-
-   module.labels = vector_create(IR_VALUES_SIZE);
-   module.labels_root = node_get_root(&module.labels);
-
    module.idents = hash_create(IR_IDENTS_SIZE);
 
    return module;
@@ -1045,32 +1026,6 @@ static ir_function ir_module_get_function(const ir_module *const module, const i
    return ir_function_load(&module->functions, id);
 }
 
-static size_t ir_module_get_value_count(const ir_module *const module)
-{
-   return node_get_amount(&module->values_root);
-}
-static ir_value ir_module_index_value(const ir_module *const module, const size_t idx)
-{
-   return node_get_child(&module->values_root, idx);
-}
-static ir_value ir_module_get_value(const ir_module *const module, const item_t id)
-{
-   return ir_value_load(&module->values, id);
-}
-
-static size_t ir_module_get_label_count(const ir_module *const module)
-{
-   return node_get_amount(&module->labels_root);
-}
-static ir_label ir_module_index_label(const ir_module *const module, const size_t idx)
-{
-   return node_get_child(&module->labels_root, idx);
-}
-static ir_label ir_module_get_label(const ir_module *const module, const item_t id)
-{
-   return ir_label_load(&module->labels, id);
-}
-
 static void ir_idents_add(ir_module *const module, const item_t id, const item_t value)
 {
    const item_t idx = hash_add(&module->idents, id, 1);
@@ -1097,9 +1052,9 @@ ir_builder create_ir_builder(ir_module *const module, const syntax *const sx)
 
    builder.module = module;
 
-   builder.break_label = IR_LABEL_NULL;
-   builder.continue_label = IR_LABEL_NULL;
-   builder.function_end_label = IR_LABEL_NULL;
+   builder.break_label = IR_VALUE_VOID;
+   builder.continue_label = IR_VALUE_VOID;
+   builder.function_end_label = IR_VALUE_VOID;
 
    return builder;
 }
@@ -1107,15 +1062,6 @@ ir_builder create_ir_builder(ir_module *const module, const syntax *const sx)
 
 
 // Функции построителя.
-
-static ir_value ir_get_value(const ir_builder *const builder, const item_t id)
-{
-   return ir_module_get_value(builder->module, id);
-}
-static ir_label ir_get_label(const ir_builder *const builder, const item_t id)
-{
-   return ir_module_get_label(builder->module, id);
-}
 
 static ir_function ir_get_function(const ir_builder *const builder, const item_t id)
 {
@@ -1194,7 +1140,8 @@ static item_t ir_build_temp(ir_builder *const builder, const item_t type)
 	   unimplemented();
    }
 
-   const ir_value value = create_ir_temp_value(&builder->module->values_root, type, temp_id);
+   const ir_block block = ir_get_current_block(builder);
+   const ir_value value = create_ir_temp_value(&block, type, temp_id);
    const item_t value_id = ir_value_save(&value);
    builder->temp_values[temp_id] = value_id;
    builder->temp_used[temp_id] = true;
@@ -1203,7 +1150,8 @@ static item_t ir_build_temp(ir_builder *const builder, const item_t type)
 }
 static item_t ir_build_imm_int(ir_builder *const builder, const int int_)
 {
-   ir_value value = create_ir_imm_int(&builder->module->values_root, int_);
+   const ir_block block = ir_get_current_block(builder);
+   ir_value value = create_ir_imm_int(&block, int_);
    item_t id = ir_value_save(&value);
    item_t temp_value = ir_build_temp(builder, TYPE_INTEGER);
    ir_build_move(builder, id, temp_value);
@@ -1211,7 +1159,8 @@ static item_t ir_build_imm_int(ir_builder *const builder, const int int_)
 }
 static item_t ir_build_imm_float(ir_builder *const builder, const float float_)
 {
-   ir_value value = create_ir_imm_float(&builder->module->values_root, float_);
+   const ir_block block = ir_get_current_block(builder);
+   ir_value value = create_ir_imm_float(&block, float_);
    item_t id = ir_value_save(&value);
    item_t temp_value = ir_build_temp(builder, TYPE_FLOATING);
    ir_build_move(builder, id, temp_value);
@@ -1318,9 +1267,8 @@ static item_t ir_build_alloca(ir_builder *const builder, const item_t type)
 {
    const syntax *const sx = builder->sx;
 
-   const item_t res = ir_build_local(builder, type);
    const item_t size = ir_build_imm_int(builder, type_size(sx, type) * 4);
-   ir_build_instr(builder, IR_IC_ALLOCA, size, IR_VALUE_VOID, res);
+   ir_build_instr(builder, IR_IC_ALLOCA, size, IR_VALUE_VOID, IR_VALUE_VOID);
 
    return res;
 }
@@ -3447,24 +3395,65 @@ void ir_block_calculate_next_use(ir_block *const block)
 	}
 }
 
+typedef node ir_block_dag_node;
+
+typedef enum ir_block_dag_node_kind
+{
+	/** Node that stores only one value and was created in previous blocks */
+	IR_DAG_VALUE,
+	/** Node that stores instruction and number of values corresponding to that instruction */
+	IR_DAG_INSTR,
+} ir_block_dag_node_kind;
+
+static ir_block_dag_node create_ir_value_dag_node(const node *const nd, const item_t value)
+{
+	ir_block_dag_node node = node_add_child(nd, IR_DAG_VALUE);
+	node_add_arg(&node, value);
+	return node;
+}
+
+static ir_block_dag_node ir_value_dag_node_get_value(const node *const nd, const item_t value)
+{
+	return node_get_arg(nd, 0);
+}
+
+static ir_block_dag_node create_ir_instr_dag_node(const node *const nd, const ir_ic ic)
+{
+	ir_block_dag_node node = node_add_child(nd, IR_DAG_INSTR);
+	node_add_arg(&node, ic);
+	return node;
+}
+
+static void ir_instr_dag_node_add_value(const ir_block_dag_node *const nd, const item_t value)
+{
+	node_add_arg(nd, value);
+}
+
+static void ir_instr_dag_node_get_ic(const ir_block_dag_node *const nd)
+{
+	return node_get_arg(nd, 0);
+}
+
+static size_t ir_instr_dag_node_get_value_amount(const ir_block_dag_node *const nd, const item_t value)
+{
+	return node_get_amount(nd) - 1;
+}
+
+static item_t ir_instr_dag_node_index_value(const ir_block_dag_node *const nd, const size_t index)
+{
+	return node_get_arg(nd, index - 1);
+}
+
 static void ir_optimize_block(ir_block *const block)
 {
 	ir_block_calculate_next_use(block);
-	vector instructions = vector_create(ir_block_get_instr_count(block));
-	node instr_root = node_get_root(&instructions);
+	vector dag_nodes = vector_create(ir_block_get_instr_count(block));
+	map value_to_instr = map_create(ir_block_get_instr_count(block));
+
 	for (size_t i = ir_block_get_instr_count(block); i >= 0; i--)
 	{
-		ir_instr instr = ir_block_index_instr(block, i);
-		switch (ir_instr_get_kind(&instr))
-		{
-			case IR_INSTR_KIND_N:
-			{
-				create_ir_instr()
-				break;
-			}
-			case IR_INSTR_KIND_RN:
-			case IR_INSTR_KIND_BN:
-		}
+		const ir_instr instr = ir_block_index_instr(block, i);
+		node_
 	}
 
 }
