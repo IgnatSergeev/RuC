@@ -380,11 +380,7 @@ static ir_node_kind ir_node_get_kind(const node *const nd)
 // Значения.
 
 typedef enum ir_value_kind {
-   IR_VALUE_KIND_VOID,
    IR_VALUE_KIND_IMM,
-   IR_VALUE_KIND_TEMP,
-   IR_VALUE_KIND_LOCAL,
-   IR_VALUE_KIND_GLOBAL,
    IR_VALUE_KIND_PARAM
 } ir_value_kind;
 
@@ -420,13 +416,6 @@ static ir_value create_ir_imm_string(const node *const nd, const size_t string)
 {
    ir_value value = create_ir_imm_value(nd, TYPE_ARRAY);
    node_add_arg(&value, string);
-   return value;
-}
-
-static ir_value create_ir_temp_value(const node *const nd, const item_t type, const size_t id)
-{
-   ir_value value = create_ir_value(nd, IR_VALUE_KIND_TEMP, type);
-   node_add_arg(&value, id);
    return value;
 }
 
@@ -470,11 +459,6 @@ static ir_value_kind ir_value_get_kind(const ir_value *const value)
     return node_get_arg(value, 0);
 }
 
-static bool ir_value_is_temp(const ir_value *const value)
-{
-	assert(ir_node_get_kind(value) == IR_VALUE);
-    return ir_value_get_kind(value) == IR_VALUE_KIND_TEMP;
-}
 static bool ir_value_is_imm(const ir_value *const value)
 {
 	assert(ir_node_get_kind(value) == IR_VALUE);
@@ -500,12 +484,6 @@ static float ir_imm_value_get_float(const ir_value *const value)
 static size_t ir_imm_value_get_string(const ir_value *const value)
 {
 	assert(ir_value_get_type(value) == IR_VALUE_KIND_IMM);
-    return node_get_arg(value, 2);
-}
-
-static item_t ir_temp_value_get_id(const ir_value *const value)
-{
-	assert(ir_value_get_type(value) == IR_VALUE_KIND_TEMP);
     return node_get_arg(value, 2);
 }
 
@@ -868,6 +846,16 @@ static size_t ir_instr_get_res_next_use(const ir_instr *const instr)
 	return ir_instr_get_op3_next_use(instr);
 }
 
+static item_t ir_instr_save(const ir_instr *const instr)
+{
+	return (item_t) node_save(instr);
+}
+static ir_instr ir_instr_load(const vector *const tree, const item_t id)
+{
+	ir_instr instr = node_load(tree, id);
+	return instr;
+}
+
 // Базовые блоки
 
 typedef node ir_block;
@@ -885,6 +873,16 @@ static size_t ir_block_get_instr_count(const ir_block *const block)
 static ir_instr ir_block_index_instr(const ir_block *const block, size_t idx)
 {
 	return node_get_child(block, idx);
+}
+
+static item_t ir_block_save(const ir_block *const block)
+{
+	return (item_t) node_save(block);
+}
+static ir_block ir_block_load(const vector *const tree, const item_t id)
+{
+	ir_block block = node_load(tree, id);
+	return block;
 }
 
 // Функции.
@@ -983,9 +981,6 @@ ir_module create_ir_module()
 
    module.externs = vector_create(IR_EXTERNS_SIZE);
    module.externs_root = node_get_root(&module.externs);
-
-   module.globals = vector_create(IR_GLOBALS_SIZE);
-   module.globals_root = node_get_root(&module.globals);
 
    module.functions = vector_create(IR_FUNCTIONS_SIZE);
    module.functions_root = node_get_root(&module.functions);
@@ -1123,48 +1118,19 @@ static void ir_build_global(ir_builder *const builder, const item_t id, const it
 
 // Построение значений.
 
-// FIXME: ir_build_move необходим для реализации Immediate значений как rvalue,
-// поскольку далеко не все целевые архитектуры имеют функции поддерживающие
-// immediate как операнд, мы передаем в почти все gen_*() инструкции temp rvalue.
-static void ir_build_move(ir_builder *const builder, const item_t src, const item_t dest);
-
-static item_t ir_build_temp(ir_builder *const builder, const item_t type)
-{
-   size_t temp_id = 0;
-
-   while(temp_id < IR_MAX_TEMP_VALUES && builder->temp_used[temp_id])
-	   temp_id++;
-   if (temp_id == IR_MAX_TEMP_VALUES)
-   {
-	   // Stub.
-	   unimplemented();
-   }
-
-   const ir_block block = ir_get_current_block(builder);
-   const ir_value value = create_ir_temp_value(&block, type, temp_id);
-   const item_t value_id = ir_value_save(&value);
-   builder->temp_values[temp_id] = value_id;
-   builder->temp_used[temp_id] = true;
-
-   return value_id;
-}
 static item_t ir_build_imm_int(ir_builder *const builder, const int int_)
 {
    const ir_block block = ir_get_current_block(builder);
    ir_value value = create_ir_imm_int(&block, int_);
-   item_t id = ir_value_save(&value);
-   item_t temp_value = ir_build_temp(builder, TYPE_INTEGER);
-   ir_build_move(builder, id, temp_value);
-   return temp_value;
+
+   return ir_value_save(&value);
 }
 static item_t ir_build_imm_float(ir_builder *const builder, const float float_)
 {
    const ir_block block = ir_get_current_block(builder);
    ir_value value = create_ir_imm_float(&block, float_);
-   item_t id = ir_value_save(&value);
-   item_t temp_value = ir_build_temp(builder, TYPE_FLOATING);
-   ir_build_move(builder, id, temp_value);
-   return temp_value;
+
+   return ir_value_save(&value);
 }
 static item_t ir_build_imm_zero(ir_builder *const builder)
 {
@@ -1193,50 +1159,33 @@ static item_t ir_build_imm_fminus_one(ir_builder *const builder)
 }
 static item_t ir_build_imm_string(ir_builder *const builder, size_t string)
 {
-   ir_value value = create_ir_imm_string(&builder->module->values_root, string);
+	const ir_block block = ir_get_current_block(builder);
+   ir_value value = create_ir_imm_string(&block, string);
    return ir_value_save(&value);
 }
 
-static item_t ir_build_local(ir_builder *const builder, const item_t type)
-{
-   const ir_value value = create_ir_local_value(&builder->module->values_root, type, ir_locals_get(builder));
-   ir_locals_add(builder, type);
-
-   return ir_value_save(&value);
-}
 static item_t ir_build_param(ir_builder *const builder, const item_t type, size_t number)
 {
-   const ir_value value = create_ir_param_value(&builder->module->values_root, type, number);
+   const ir_block block = ir_get_current_block(builder);
+   const ir_value value = create_ir_param_value(&block, type, number);
 
    return ir_value_save(&value);
-}
-static void ir_free_value(ir_builder *const builder, item_t value)
-{
-   const ir_value temp = ir_value_load(&builder->module->values, value);
-   if (!ir_value_is_temp(&temp))
-	   return;
-
-   builder->temp_used[ir_temp_value_get_id(&temp)] = false;
-}
-
-static item_t ir_add_label(ir_builder *const builder, const ir_label_kind kind)
-{
-   const ir_label label_ = create_ir_label(&builder->module->labels_root, kind);
-   return ir_label_save(&label_);
 }
 
 // Функции построения инструкций и блоков.
 
-static void ir_build_instr(ir_builder *const builder, const ir_ic ic, const item_t op1, const item_t op2, const item_t res)
+static item_t ir_build_instr(ir_builder *const builder, const ir_ic ic, const item_t op1, const item_t op2, const item_t op3)
 {
-   ir_block block = ir_get_current_block(builder);
-   create_ir_instr(&block, ic, op1, op2, res);
+   const ir_block block = ir_get_current_block(builder);
+   const ir_instr instr = create_ir_instr(&block, ic, op1, op2, op3);
+   return ir_instr_save(&instr);
 }
 
 static void ir_build_block(ir_builder *const builder)
 {
 	ir_function function = ir_get_current_function(builder);
-	create_ir_block(&function);
+	const ir_block block = create_ir_block(&function);
+	return ir_block_save(&block);
 }
 
 static void ir_build_nop(ir_builder *const builder)
@@ -1251,12 +1200,7 @@ static void ir_build_move(ir_builder *const builder, const item_t src, const ite
 
 static item_t ir_build_load(ir_builder *const builder, const item_t src)
 {
-   const ir_value src_value = ir_get_value(builder, src);
-   const item_t type = ir_value_get_type(&src_value);
-
-   const item_t res = ir_build_temp(builder, type);
-   ir_build_instr(builder, IR_IC_LOAD, src, IR_VALUE_VOID, res);
-   return res;
+   return ir_build_instr(builder, IR_IC_LOAD, src, IR_VALUE_VOID, IR_VALUE_VOID);
 }
 static void ir_build_store(ir_builder *const builder, const item_t src, const item_t dest)
 {
@@ -1268,14 +1212,13 @@ static item_t ir_build_alloca(ir_builder *const builder, const item_t type)
    const syntax *const sx = builder->sx;
 
    const item_t size = ir_build_imm_int(builder, type_size(sx, type) * 4);
-   ir_build_instr(builder, IR_IC_ALLOCA, size, IR_VALUE_VOID, IR_VALUE_VOID);
-
-   return res;
+   return ir_build_instr(builder, IR_IC_ALLOCA, size, IR_VALUE_VOID, IR_VALUE_VOID);
 }
 
 static item_t ir_build_ptr(ir_builder *const builder, const item_t type, const item_t base, const size_t displ)
 {
-   const ir_value base_value = ir_get_value(builder, base);
+
+   const ir_instr base_value = ir_instr_load(&builder->module->functions, base);
    const ir_value_kind base_kind = ir_value_get_kind(&base_value);
 
    switch (base_kind)

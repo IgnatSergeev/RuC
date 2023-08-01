@@ -393,11 +393,11 @@ typedef struct ir_module
 	vector externs;
 	node externs_root;
 
-	vector globals;
-	node globals_root;
-
 	vector functions;
 	node functions_root;
+
+	vector labels;
+	node labels_root;
 
 	hash idents;
 } ir_module;
