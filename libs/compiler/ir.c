@@ -548,6 +548,20 @@ static bool node_equals_const_int(const ir_value_node *const nd, const ir_const_
 	return true;
 }
 
+static bool tree_contains_const_int(vector *const tree, const ir_const_int value)
+{
+	for(size_t i = 0; i < vector_size(tree); i++)
+	{
+	   const node nd = node_load(tree, i);
+	   if (node_equals_const_int(&nd, value))
+	   {
+		   return true;
+	   }
+	}
+
+	return false;
+}
+
 static item_t IR_CONST_FLOAT_ARGS = IR_CONST_ARGS + 1;
 typedef struct ir_const_float {
 	const ir_const base;
@@ -591,6 +605,20 @@ static bool node_equals_const_float(const ir_value_node *const nd, const ir_cons
 	return true;
 }
 
+static bool tree_contains_const_float(vector *const tree, const ir_const_float value)
+{
+	for(size_t i = 0; i < vector_size(tree); i++)
+	{
+	   const node nd = node_load(tree, i);
+	   if (node_equals_const_float(&nd, value))
+	   {
+		   return true;
+	   }
+	}
+
+	return false;
+}
+
 static item_t IR_CONST_STRING_ARGS = IR_CONST_ARGS + 1;
 typedef struct ir_const_string {
 	const ir_const base;
@@ -632,6 +660,20 @@ static bool node_equals_const_string(const ir_value_node *const nd, const ir_con
 	}
 
 	return true;
+}
+
+static bool tree_contains_const_string(vector *const tree, const ir_const_string value)
+{
+	for(size_t i = 0; i < vector_size(tree); i++)
+	{
+	   const node nd = node_load(tree, i);
+	   if (node_equals_const_string(&nd, value))
+	   {
+		   return true;
+	   }
+	}
+
+	return false;
 }
 
 // Параметры.
@@ -690,6 +732,20 @@ static bool node_equals_param(const ir_value_node *const nd, const ir_param valu
 	}
 
 	return true;
+}
+
+static bool tree_contains_param(vector *const tree, const ir_param value)
+{
+	for(size_t i = 0; i < vector_size(tree); i++)
+	{
+	   const node nd = node_load(tree, i);
+	   if (node_equals_param(&nd, value))
+	   {
+		   return true;
+	   }
+	}
+
+	return false;
 }
 
 // Внешние символы.
@@ -1002,6 +1058,20 @@ static bool node_equals_instr(const ir_value_node *const nd, const ir_instr valu
    }
 
    return true;
+}
+
+static bool tree_contains_instr(vector *const tree, const ir_instr value)
+{
+   for(size_t i = 0; i < vector_size(tree); i++)
+   {
+	   const node nd = node_load(tree, i);
+	   if (node_equals_instr(&nd, value))
+	   {
+		   return true;
+	   }
+   }
+
+   return false;
 }
 
 /*
