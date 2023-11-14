@@ -548,18 +548,38 @@ static bool node_equals_const_int(const ir_value_node *const nd, const ir_const_
 	return true;
 }
 
-static bool tree_contains_const_int(vector *const tree, const ir_const_int value)
+static size_t tree_find_const_int(vector *const tree, const ir_const_int value)
 {
 	for(size_t i = 0; i < vector_size(tree); i++)
 	{
 	   const node nd = node_load(tree, i);
 	   if (node_equals_const_int(&nd, value))
 	   {
-		   return true;
+		   return node_save(&nd);
 	   }
 	}
 
-	return false;
+	return SIZE_MAX;
+}
+
+static size_t subtree_find_const_int(const node *const subtree, const ir_const_int value)
+{
+	if (node_equals_const_int(subtree, value))
+	{
+	   return node_save(subtree);
+	}
+
+	for(size_t i = 0; i < node_get_amount(subtree); i++)
+	{
+	   const node nd = node_get_child(subtree, i);
+	   const size_t result = subtree_find_const_int(&nd, value);
+	   if (result != SIZE_MAX)
+	   {
+		   return result;
+	   }
+	}
+
+	return SIZE_MAX;
 }
 
 static item_t IR_CONST_FLOAT_ARGS = IR_CONST_ARGS + 1;
@@ -605,18 +625,38 @@ static bool node_equals_const_float(const ir_value_node *const nd, const ir_cons
 	return true;
 }
 
-static bool tree_contains_const_float(vector *const tree, const ir_const_float value)
+static size_t tree_find_const_float(vector *const tree, const ir_const_float value)
 {
 	for(size_t i = 0; i < vector_size(tree); i++)
 	{
 	   const node nd = node_load(tree, i);
 	   if (node_equals_const_float(&nd, value))
 	   {
-		   return true;
+		   return node_save(&nd);
 	   }
 	}
 
-	return false;
+	return SIZE_MAX;
+}
+
+static size_t subtree_find_const_float(const node *const subtree, const ir_const_float value)
+{
+	if (node_equals_const_float(subtree, value))
+	{
+	   return node_save(subtree);
+	}
+
+	for(size_t i = 0; i < node_get_amount(subtree); i++)
+	{
+	   const node nd = node_get_child(subtree, i);
+	   const size_t result = subtree_find_const_float(&nd, value);
+	   if (result != SIZE_MAX)
+	   {
+		   return result;
+	   }
+	}
+
+	return SIZE_MAX;
 }
 
 static item_t IR_CONST_STRING_ARGS = IR_CONST_ARGS + 1;
@@ -662,18 +702,38 @@ static bool node_equals_const_string(const ir_value_node *const nd, const ir_con
 	return true;
 }
 
-static bool tree_contains_const_string(vector *const tree, const ir_const_string value)
+static size_t tree_find_const_string(vector *const tree, const ir_const_string value)
 {
 	for(size_t i = 0; i < vector_size(tree); i++)
 	{
 	   const node nd = node_load(tree, i);
 	   if (node_equals_const_string(&nd, value))
 	   {
-		   return true;
+		   return node_save(&nd);
 	   }
 	}
 
-	return false;
+	return SIZE_MAX;
+}
+
+static size_t subtree_find_const_string(const node *const subtree, const ir_const_string value)
+{
+	if (node_equals_const_string(subtree, value))
+	{
+	   return node_save(subtree);
+	}
+
+	for(size_t i = 0; i < node_get_amount(subtree); i++)
+	{
+	   const node nd = node_get_child(subtree, i);
+	   const size_t result = subtree_find_const_string(&nd, value);
+	   if (result != SIZE_MAX)
+	   {
+		   return result;
+	   }
+	}
+
+	return SIZE_MAX;
 }
 
 // Параметры.
@@ -732,20 +792,6 @@ static bool node_equals_param(const ir_value_node *const nd, const ir_param valu
 	}
 
 	return true;
-}
-
-static bool tree_contains_param(vector *const tree, const ir_param value)
-{
-	for(size_t i = 0; i < vector_size(tree); i++)
-	{
-	   const node nd = node_load(tree, i);
-	   if (node_equals_param(&nd, value))
-	   {
-		   return true;
-	   }
-	}
-
-	return false;
 }
 
 // Внешние символы.
@@ -1060,18 +1106,38 @@ static bool node_equals_instr(const ir_value_node *const nd, const ir_instr valu
    return true;
 }
 
-static bool tree_contains_instr(vector *const tree, const ir_instr value)
+static size_t tree_find_instr(vector *const tree, const ir_instr value)
 {
    for(size_t i = 0; i < vector_size(tree); i++)
    {
 	   const node nd = node_load(tree, i);
 	   if (node_equals_instr(&nd, value))
 	   {
-		   return true;
+		   return node_save(&nd);
 	   }
    }
 
-   return false;
+   return SIZE_MAX;
+}
+
+static size_t subtree_find_instr(const node *const subtree, const ir_instr value)
+{
+   if (node_equals_instr(subtree, value))
+   {
+	   return node_save(subtree);
+   }
+
+   for(size_t i = 0; i < node_get_amount(subtree); i++)
+   {
+	   const node nd = node_get_child(subtree, i);
+	   const size_t result = subtree_find_instr(&nd, value);
+	   if (result != SIZE_MAX)
+	   {
+		   return result;
+	   }
+   }
+
+   return SIZE_MAX;
 }
 
 /*
