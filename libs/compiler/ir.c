@@ -430,8 +430,19 @@ static ir_value_node ir_value_load(const vector *const tree, const item_t value)
 
 static ir_value get_ir_value(const ir_value_node *const nd)
 {
+   assert(node_get_amount(nd) >= IR_VALUE_ARGS);
    const ir_value value = { .ir_type = node_get_type(nd), .kind = node_get_arg(nd, IR_VALUE_ARGS - 2), .scope = node_get_arg(nd, IR_VALUE_ARGS - 1) };
    return value;
+}
+
+static bool node_equals_value(const ir_value_node *const nd, const ir_value value)
+{
+   if (node_get_amount(nd) < IR_VALUE_ARGS || node_get_arg(nd, IR_VALUE_ARGS - 2) != value.kind || node_get_arg(nd, IR_VALUE_ARGS - 1) != value.scope)
+   {
+	   return false;
+   }
+
+   return true;
 }
 
 ///TODO: 3 ir_value, и всего дальнейшего по 3, эти создают, остальные меняют тип и добавляют аргументы
@@ -471,10 +482,25 @@ static ir_value_node add_ir_const(const node *const nd, const ir_const value)
 
 static ir_const get_ir_const(const ir_value_node *const nd)
 {
+	assert(node_get_amount(nd) >= IR_CONST_ARGS);
 	assert(node_get_type(nd) >= CONST_INT && node_get_type(nd) <= CONST_STRING);
 	const ir_value base = get_ir_value(nd);
 	const ir_const value = { .base = base, .type = node_get_arg(nd, IR_CONST_ARGS - 1) };
 	return value;
+}
+
+static bool node_equals_const(const ir_value_node *const nd, const ir_const value)
+{
+	if (!node_equals_value(nd, value.base))
+	{
+	   return false;
+	}
+	if (node_get_amount(nd) < IR_CONST_ARGS || node_get_arg(nd, IR_CONST_ARGS - 1) != value.type)
+	{
+	   return false;
+	}
+
+	return true;
 }
 
 // Константные типы
@@ -501,10 +527,25 @@ static ir_value_node add_ir_const_int(const node *const nd, const ir_const_int v
 
 static ir_const_int get_ir_const_int(const ir_value_node *const nd)
 {
+	assert(node_get_amount(nd) >= IR_CONST_INT_ARGS);
 	assert(node_get_type(nd) == CONST_INT);
 	const ir_const base = get_ir_const(nd);
 	const ir_const_int value = { .base = base, .value = node_get_arg(nd, IR_CONST_INT_ARGS - 1) };
 	return value;
+}
+
+static bool node_equals_const_int(const ir_value_node *const nd, const ir_const_int value)
+{
+	if (!node_equals_const(nd, value.base))
+	{
+	   return false;
+	}
+	if (node_get_amount(nd) < IR_CONST_INT_ARGS || node_get_arg(nd, IR_CONST_INT_ARGS - 1) != value.value)
+	{
+	   return false;
+	}
+
+	return true;
 }
 
 static item_t IR_CONST_FLOAT_ARGS = IR_CONST_ARGS + 1;
@@ -529,10 +570,25 @@ static ir_value_node add_ir_const_float(const node *const nd, const ir_const_flo
 
 static ir_const_float get_ir_const_float(const ir_value_node *const nd)
 {
+	assert(node_get_amount(nd) >= IR_CONST_FLOAT_ARGS);
 	assert(node_get_type(nd) == CONST_FLOAT);
 	const ir_const base = get_ir_const(nd);
 	const ir_const_float value = { .base = base, .value = node_get_arg(nd, IR_CONST_FLOAT_ARGS - 1) };
 	return value;
+}
+
+static bool node_equals_const_float(const ir_value_node *const nd, const ir_const_float value)
+{
+	if (!node_equals_const(nd, value.base))
+	{
+	   return false;
+	}
+	if (node_get_amount(nd) < IR_CONST_FLOAT_ARGS || node_get_arg(nd, IR_CONST_FLOAT_ARGS - 1) != value.value)
+	{
+	   return false;
+	}
+
+	return true;
 }
 
 static item_t IR_CONST_STRING_ARGS = IR_CONST_ARGS + 1;
@@ -557,10 +613,25 @@ static ir_value_node add_ir_const_string(const node *const nd, const ir_const_st
 
 static ir_const_string get_ir_const_string(const ir_value_node *const nd)
 {
+	assert(node_get_amount(nd) >= IR_CONST_STRING_ARGS);
 	assert(node_get_type(nd) == CONST_STRING);
 	const ir_const base = get_ir_const(nd);
 	const ir_const_string value = { .base = base, .value = node_get_arg(nd, IR_CONST_STRING_ARGS - 1) };
 	return value;
+}
+
+static bool node_equals_const_string(const ir_value_node *const nd, const ir_const_string value)
+{
+	if (!node_equals_const(nd, value.base))
+	{
+	   return false;
+	}
+	if (node_get_amount(nd) < IR_CONST_STRING_ARGS || node_get_arg(nd, IR_CONST_STRING_ARGS - 1) != value.value)
+	{
+	   return false;
+	}
+
+	return true;
 }
 
 // Параметры.
@@ -577,7 +648,7 @@ typedef struct ir_param {
 static ir_param create_ir_param(const item_t type, const size_t num)
 {
 	const ir_value base = create_ir_value(IR_VALUE_LOCAL, IR_PARAM, PARAM);
-	const ir_param param = { .base = base, .type = type, .has_displ = false, .num = num };
+	const ir_param param = { .base = base, .type = type, .has_displ = false, .num = num, .displ = 0 };
 	return param;
 }
 
@@ -600,10 +671,25 @@ static ir_value_node add_ir_param(const node *const nd, const ir_param value)
 
 static ir_param get_ir_param(const ir_value_node *const nd)
 {
+	assert(node_get_amount(nd) >= IR_PARAM_ARGS);
 	assert(node_get_type(nd) == PARAM);
 	const ir_value base = get_ir_value(nd);
-	const ir_param value = { .base = base, .displ = node_get_arg(nd, IR_CONST_STRING_ARGS - 1), .has_displ = node_get_arg(nd, IR_CONST_STRING_ARGS - 2), .num = node_get_arg(nd, IR_CONST_STRING_ARGS - 3), .type = node_get_arg(nd, IR_CONST_STRING_ARGS - 4) };
+	const ir_param value = { .base = base, .displ = node_get_arg(nd, IR_PARAM_ARGS - 1), .has_displ = node_get_arg(nd, IR_PARAM_ARGS - 2), .num = node_get_arg(nd, IR_PARAM_ARGS - 3), .type = node_get_arg(nd, IR_PARAM_ARGS - 4) };
 	return value;
+}
+
+static bool node_equals_param(const ir_value_node *const nd, const ir_param value)
+{
+	if (!node_equals_value(nd, value.base))
+	{
+	   return false;
+	}
+	if (node_get_amount(nd) < IR_PARAM_ARGS || node_get_arg(nd, IR_PARAM_ARGS - 1) != value.displ || node_get_arg(nd, IR_PARAM_ARGS - 2) != value.has_displ || node_get_arg(nd, IR_PARAM_ARGS - 3) != value.num || node_get_arg(nd, IR_PARAM_ARGS - 4) != value.type)
+	{
+	   return false;
+	}
+
+	return true;
 }
 
 // Внешние символы.
@@ -858,21 +944,21 @@ typedef struct ir_instr {
 static ir_instr create_loc_ir_instr(const node *const nd, const ir_ic ic, const item_t op1, const item_t op2)
 {
    const ir_value base = create_ir_value(IR_VALUE_LOCAL, IR_INSTR, INSTR);
-   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false };
+   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false, .type = 0, .displ = 0 };
    return param;
 }
 
 static ir_instr create_tmp_ir_instr(const node *const nd, const ir_ic ic, const item_t op1, const item_t op2)
 {
    const ir_value base = create_ir_value(IR_VALUE_TEMP, IR_INSTR, INSTR);
-   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false };
+   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false, .type = 0, .displ = 0 };
    return param;
 }
 
 static ir_instr create_glob_ir_instr(const node *const nd, const ir_ic ic, const item_t op1, const item_t op2)
 {
    const ir_value base = create_ir_value(IR_VALUE_GLOBAL, IR_INSTR, INSTR);
-   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false };
+   const ir_instr param = { .base = base, .ic = ic, .op1 = op1, .op2 = op2, .has_displ = false, .type = 0, .displ = 0 };
    return param;
 }
 
@@ -897,10 +983,25 @@ static ir_value_node add_ir_instr(const node *const nd, const ir_instr value)
 
 static ir_instr get_ir_instr(const ir_value_node *const nd)
 {
+   assert(node_get_amount(nd) >= IR_INSTR_ARGS);
    assert(node_get_type(nd) == INSTR);
    const ir_value base = get_ir_value(nd);
    const ir_instr value = { .base = base, .ic = node_get_arg(nd, IR_INSTR_ARGS - 6), .op1 = node_get_arg(nd, IR_INSTR_ARGS - 5), .op2 = node_get_arg(nd, IR_INSTR_ARGS - 4), .has_displ = node_get_arg(nd, IR_INSTR_ARGS - 3), .type = node_get_arg(nd, IR_INSTR_ARGS - 2), .displ = node_get_arg(nd, IR_INSTR_ARGS - 1) };
    return value;
+}
+
+static bool node_equals_instr(const ir_value_node *const nd, const ir_instr value)
+{
+   if (!node_equals_value(nd, value.base))
+   {
+	   return false;
+   }
+   if (node_get_amount(nd) < IR_INSTR_ARGS || node_get_arg(nd, IR_INSTR_ARGS - 1) != value.displ || node_get_arg(nd, IR_INSTR_ARGS - 2) != value.type || node_get_arg(nd, IR_INSTR_ARGS - 3) != value.has_displ || node_get_arg(nd, IR_INSTR_ARGS - 4) != value.op2 || node_get_arg(nd, IR_INSTR_ARGS - 5) != value.op1 || node_get_arg(nd, IR_INSTR_ARGS - 6) != value.ic)
+   {
+	   return false;
+   }
+
+   return true;
 }
 
 /*
@@ -955,15 +1056,6 @@ static size_t ir_instr_get_res_next_use(const ir_instr *const instr)
 	return ir_instr_get_op3_next_use(instr);
 }
 */
-static item_t ir_instr_save(const ir_instr *const instr)
-{
-	return (item_t) node_save(instr);
-}
-static ir_instr ir_instr_load(const vector *const tree, const item_t id)
-{
-	ir_instr instr = node_load(tree, id);
-	return instr;
-}
 
 // Базовые блоки
 
