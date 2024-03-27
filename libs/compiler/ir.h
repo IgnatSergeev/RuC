@@ -399,6 +399,9 @@ typedef struct ir_module
 	vector functions;
 	node functions_root;
 
+	vector values;
+	node values_root;
+
 	vector labels;
 	node labels_root;
 
